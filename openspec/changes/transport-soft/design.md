@@ -82,8 +82,11 @@ CI produce credential fixtures with real keys.
 ## Open questions
 
 1. ~~Phase letter~~ — RESOLVED 2026-09-22: Phase B per the phased plan.
-2. Should keepalive injection emit the CTAPHID keepalive byte (0x8B) or an
-   NFC APDU "time extension"? Spec states it abstractly as a keepalive-event
-   stream; per-transport framing belongs to the transport changes.
+2. ~~Should keepalive injection emit the CTAPHID keepalive status byte or an
+   NFC APDU "time extension"?~~ — RESOLVED 2026-09-22 (audit discharge): the
+   spec deliberately keeps it abstract as a keepalive-event stream; the
+   transport changes already answered the framing per transport
+   (transport-hid: CTAPHID 0x01/0x02 status bytes per CTAP2.1 §11.2.9.1.7;
+   transport-pcsc: APDU-layer progress signals). Nothing left to decide.
 3. Does the snapshot format need a version field for forward compatibility?
    Spec includes one; confirm serde format (JSON vs CBOR) at implementation.

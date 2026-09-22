@@ -14,7 +14,7 @@ notification mechanism wired into the default executor ecosystem for
 hidraw that works without either a blocking thread or an external
 polling reactor. CTAPHID (CTAP2.1 §8.1) additionally requires
 keepalive-driven polling loops (authenticator emits
-`CTAPHID_KEEPALIVE` status 0xBB with UPNEEDED while waiting for user
+`CTAPHID_KEEPALIVE` status 0x02 (UPNEEDED) in CTAPHID keepalive frames (cmd 0x3B) while waiting for user
 presence, CTAP2.1 §8.1.5.1), so transport code inherently contains
 "wait until response or deadline" logic. The project stack invariants
 require: no executor dependency in core crates, every wait bounded by a

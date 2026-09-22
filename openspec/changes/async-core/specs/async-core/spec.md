@@ -49,7 +49,7 @@ sending a CTAP command and receiving its response, opening a channel
 the FIDO application per CTAP2.1 §11 for PC/SC), and closing the
 device. Every `Device` operation SHALL accept a deadline derived from
 the ceremony budget and SHALL return a typed error on failure.
-CTAPHID keepalive statuses (0xBB UPNEEDED per CTAP2.1 §8.1.5.1) SHALL
+CTAPHID keepalive statuses (UPNEEDED 0x02 in frames carrying cmd 0x3B, per CTAP2.1 §11.2.9.1.7) SHALL
 be handled inside the transport and surfaced to the caller as progress
 signals, not errors, until the deadline expires.
 
