@@ -111,9 +111,11 @@ scope (project non-goal).
 
 ### Requirement: Ceremony sequence per CTAP2.1 §6.2 with single-budget keepalive loop
 
-The ceremony SHALL execute in order: (1) an optional
-authenticatorGetInfo probe (CTAP2.1 §6.4) per the probe policy;
-(2) send authenticatorGetAssertion (CTAP2.1 §6.2); (3) consume
+The ceremony SHALL execute in order: (1) a mandatory
+authenticatorGetInfo probe (CTAP2.1 §6.4) — always run, every ceremony;
+the capabilities response SHALL drive request construction (options,
+uv capability, pinUvAuthToken availability) and SHALL be included in
+the ceremony outcome; (2) send authenticatorGetAssertion (CTAP2.1 §6.2); (3) consume
 keepalive / user-presence progress signals surfaced by the transport
 (CTAPHID KEEPALIVE UPNEEDED per CTAP2.1 §8.1.5.1; surfaced as progress,
 not errors, per async-core) until a terminal response arrives. The

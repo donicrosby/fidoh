@@ -88,17 +88,18 @@ transport kind (hid / pcsc / soft), the transport's device identifier
 and an optional AAGUID. The AAGUID is present only when a getInfo probe
 (CTAP2.1 §6.4) ran against that candidate.
 
-Probing every candidate during discovery would multiply device traffic
-and wait time, so the probe policy is:
+Probe policy (RESOLVED OQ-2, 2026-09-22, owner decision): the ceremony
+MUST run authenticatorGetInfo (CTAP2.1 §6.4) on the selected device
+before building the getAssertion request, on every ceremony. The
+capabilities response drives request construction (options, uv
+capability, pinUvAuthToken availability) and is included in the
+ceremony outcome. During *discovery*, candidates are NOT probed (to
+avoid multiplying device traffic across candidates); the probe happens
+exactly once, after selection, on the connected device.
 
-- `ProbePolicy::IfNeeded` (default) — probe only when the caller's
-  request needs capability data (e.g. a non-default UV policy check) or
-  when the caller asks for AAGUIDs in the `AmbiguousDevice` report.
-- `ProbePolicy::Always` / `Never` — explicit overrides.
-
-Timeout bound: each probe runs under the remaining ceremony budget; a
-probe failure does not fail the ceremony — the candidate proceeds with
-AAGUID absent.
+Timeout bound: the probe runs under the remaining ceremony budget; a
+probe failure fails the ceremony with a typed error (the request cannot
+be constructed safely without capability data).
 
 ### D4: User-verification policy
 
@@ -244,25 +245,25 @@ that deserve their own change-set. Flagged as open question OQ-1.
 
 ## Open Questions
 
-- OQ-1: Should the ceremony retry retriable statuses (0x06
-  CHANNEL_BUSY, 0x3F UV_INVALID per CTAP2.1 §8.2 SHOULD-retry language)
-  within the remaining budget, and if so with what backoff driven by
-  `Sleep`? Groundable in CTAP2.1 §8.2, but the POLICY (retry count,
-  backoff shape) is a design choice, not a spec fact. Deferred to a
-  later change-set; v1 behavior is "surface as `Ctap(status)`, caller
-  re-runs".
-- OQ-2: When `UvPolicy::Preferred` is requested without a
-  caller-supplied pinUvAuthToken, should the ceremony probe getInfo
-  unconditionally to check the `uv`/`pinUvAuthToken` options
-  (CTAP2.1 §6.4) and report capability in the outcome, or is the
-  current degrade-with-report behavior sufficient? The option semantics
-  are grounded (CTAP2.1 §6.4); the UX trade-off is not. Deferred.
-- OQ-3: The wrong-credential-id check (reject an assertion whose
-  credential id is outside the caller's allow list) is a deliberate
-  library-safety rule; it is motivated by WebAuthn's assertion contract
-  but is not a verbatim MUST in CTAP2.1 §6.2 as a client-side step.
-  Recorded here per the cleanroom rule rather than presented as a
-  protocol requirement. The `CredentialMismatch` variant stays in the
-  taxonomy; if owner review judges the check overreach, the variant is
-  removed and knob (d) scenarios are re-scoped to signature-fidelity
-  checks by the caller.
+- ~~OQ-1~~ RESOLVED 2026-09-22 (owner decision): **no in-ceremony retry.**
+  Retriable statuses (0x06 CHANNEL_BUSY, 0x3F UV_INVALID) are surfaced
+  typed immediately as `Ctap(status)`; the caller re-runs the ceremony if
+  it wants to retry. Retry/backoff policy — if ever added — must live in
+  the caller or a dedicated change-set, never implicit in the ceremony.
+- ~~OQ-2~~ RESOLVED 2026-09-22 (owner decision): **always probe getInfo
+  first.** The ceremony MUST run authenticatorGetInfo before building the
+  getAssertion request, on every ceremony, regardless of UvPolicy. The
+  capabilities response drives request construction (options, uv
+  capability, pinUvAuthToken availability per CTAP2.1 §6.4) and is
+  included in the ceremony outcome so callers can reason about
+  capability. The "optional probe" phrasing in the spec is superseded:
+  probe is mandatory.
+- ~~OQ-3~~ RESOLVED 2026-09-22 (owner decision): **keep the
+  wrong-credential-id check, bail early.** `CredentialMismatch` is a
+  first-class typed error. Wherever the library can know the credential is
+  wrong for this authenticator before or early in the ceremony, it MUST
+  fail fast rather than waste the user's touch: (a) the credential-id
+  check against the caller's allow list on the returned assertion stays;
+  (b) the error message SHOULD identify the mismatch (returned id vs
+  allowed ids, truncated safely); (c) it remains documented here as a
+  library-safety rule, not a CTAP2 protocol requirement.
