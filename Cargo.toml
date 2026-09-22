@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
-members = []
+members = ["crates/fidoh-core"]
 
 [workspace.package]
 edition = "2021"
+rust-version = "1.75"
 license = "Apache-2.0"
 repository = "https://github.com/donicrosby/fidoh"
 
