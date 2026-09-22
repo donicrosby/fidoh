@@ -1,32 +1,92 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  # fidoh — cleanroom CTAP2/WebAuthn client library
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  FIDO2 / CTAP2 in Rust. D'oh!
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  ## Stack invariants (non-negotiable)
+
+  - Rust, edition 2021, Apache-2.0.
+  - **Async, runtime-agnostic core.** No tokio, async-std, smol, or any
+    executor dependency in core crates. Async expressed via
+    `core::future::Future` + traits. Timeouts are modeled as a
+    caller-provided `Sleep` future factory (timer trait), so any runtime can
+    supply it. Runtime-specific glue lives ONLY in separate adapter crates
+    (e.g. `fidoh-tokio`), never in `fidoh-core` or transport crates.
+  - **Every device wait has a caller-visible timeout.** No unbounded loops
+    anywhere. CTAPHID keepalive loops, APDU polling loops, user-presence
+    waits — all MUST terminate at a ceremony deadline and return a typed
+    `Timeout` error. An unbounded wait is a spec violation.
+  - **Explicit, deterministic device selection.** Never silently pick among
+    multiple candidate authenticators. Caller provides a selection policy
+    (`First | Select(fn) | Fail`); default is Fail with a typed
+    `AmbiguousDevice` error listing candidates.
+  - **Typed errors everywhere.** No `unwrap`/`expect` outside tests.
+    `deny(unsafe_code)` per crate unless a design.md explicitly justifies it.
+  - **Hardware transports + a software-token transport** (in-process virtual
+    authenticator) implement the SAME `Transport`/`Device` traits. The soft
+    token is the CI harness; hardware tests run on physical devices only.
+
+  ## CTAP2 surface in scope (v1)
+
+  - authenticatorGetAssertion (client side) — the full ceremony.
+  - authenticatorGetInfo (needed for capability probing).
+  - authenticatorMakeCredential is OUT of scope for the client API in v1;
+    the software-token authenticator implements it INTERNALLY to mint test
+    credentials, but that is harness plumbing, not public API.
+  - clientPIN / UV protocols, credential management, large blobs, hmac-secret:
+    explicitly out of scope for v1 (named Non-goals).
+
+  ## Transports in scope (v1)
+
+  - USB HID via CTAPHID (hidraw on Linux first; the framing spec is
+    platform-neutral).
+  - PC/SC in both flavors sharing one APDU layer: FIDO-over-CCID (YubiKey
+    fw 5.8+ USB CCID interface) and NFC (ISO 14443).
+  - Software token (in-process, no I/O).
+
+  ## RP boundary
+
+  The library is RP-agnostic. It takes a caller-supplied `clientDataHash`
+  and returns a raw assertion (authenticatorData, signature, userHandle,
+  credential id). clientDataJSON construction, origin semantics, and any
+  RP-specific wire shape are the CALLER's responsibility — never the
+  library's.
+
+  ## Cleanroom rules (absolute)
+
+  Allowed evidence sources, in order of authority:
+  1. FIDO Alliance CTAP v2.x spec (fidoalliance.org), W3C WebAuthn,
+     ISO/IEC 7816-4, PC/SC workgroup specs.
+  2. Vendor public behavior documentation (Yubico developer/technical
+     manuals — documents, NOT source code).
+  3. Live probes against our own hardware.
+  4. Capability-level feature inventory of prior art (what features exist),
+     never source code and never protocol behavior.
+
+  FORBIDDEN: reading the source of any existing CTAP2/WebAuthn client
+  library (webauthn-authenticator-rs, fido-hid-rs, libfido2, etc.) for
+  implementation details, and treating any observed third-party behavior as
+  protocol truth. If it's not in a standards doc or our own wire capture,
+  it doesn't go in a spec. When a spec statement cannot be grounded in an
+  allowed source, flag it as an open question rather than inventing it.
+
+rules:
+  proposal:
+    - Keep proposals under 500 words.
+    - Always include a "Non-goals" section.
+    - Cite the governing standard section for every protocol claim
+      (e.g. "CTAP2.1 §8.1.1", "ISO 7816-4 §7", "WebAuthn L2 §6.5").
+  design:
+    - Must state which phase (A/B/C/D) the change belongs to.
+    - Every blocking wait named in design must name its timeout bound.
+    - Document alternatives considered and why they were rejected.
+  tasks:
+    - Spec-authoring phase tasks produce documents, not code.
+    - Implementation tasks arrive in a later change set, not now.
+  specs:
+    - Every requirement MUST have at least one scenario.
+    - Every scenario involving a wait MUST state the timeout behavior.
+    - Protocol field tables belong in specs; worked examples belong in
+      docs/ and must be labeled constructed-vs-captured.
