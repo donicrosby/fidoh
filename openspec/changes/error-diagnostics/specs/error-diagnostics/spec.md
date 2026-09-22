@@ -92,9 +92,9 @@ device traffic at error time).
   the error reports the failing operation's recorded typed cause plus
   static guidance
 
-### Requirement: Diagnostics for NoDevice and channel-open failures
+### Requirement: Diagnostics for NoDevice, AmbiguousDevice, and channel-open failures
 
-`NoDevice` and channel-open failures (hidraw open, CTAPHID INIT per
+`NoDevice`, `AmbiguousDevice`, and channel-open failures (hidraw open, CTAPHID INIT per
 CTAP2.1 §11.2, APDU SELECT per CTAP2.1 §11.3.3) SHOULD carry
 actionable remediation guidance in their diagnostic message, phrased
 against the failing cause: a Linux hidraw permission failure SHALL
@@ -106,6 +106,14 @@ docs/transport-pcsc.md. The library SHALL provide the diagnostic
 string; rendering (printing, coloring, logging, localization) SHALL
 be the caller's responsibility — the library never writes to
 stdout/stderr itself.
+
+#### Scenario: AmbiguousDevice carries a remediation hint
+
+- **WHEN** discovery finds two candidates and the selection policy is
+  the default `Fail`
+- **THEN** the `AmbiguousDevice` diagnostic message lists the candidates
+  AND carries remediation guidance ("unplug the extra authenticator, or
+  pass an explicit selection policy")
 
 #### Scenario: hidraw permission failure names the udev fix (CI: transport-soft or injected open failure)
 

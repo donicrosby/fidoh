@@ -115,13 +115,16 @@ length-prefixed and structurally simpler than CBOR.
 
 ## Open questions
 
-1. Gate mechanism for T3: cargo feature `hardware-tests` vs env var
-   `FIDOH_HARDWARE_TESTS=1`. A feature changes the compile graph; an env var
-   risks silently skipping when unset. Recommendation: cargo feature,
-   confirmed at implementation.
-2. CI fuzz smoke-run duration. Too short finds nothing; too long slows every
-   PR. Recommendation: 60–120 s bounded run, corpus committed.
-3. Whether the T2 scenario matrix is enforced structurally (one test function
-   per named scenario, asserted by a compile-time list) or by review.
-   Recommendation: test names match scenario IDs in the spec; enforcement by
-   review for v1.
+1. ~~Gate mechanism for T3~~ — RESOLVED 2026-09-22 (owner decision): **env
+   var `FIDOH_HARDWARE_TESTS=1`**. Feature-gated tests change the compile
+   graph and force a rebuild just to run the hardware runbook; an env var
+   keeps one build. Mitigation for the silent-skip risk: a gated test that
+   finds the var unset MUST print a one-line skip notice, and the hardware
+   runbook in docs/testing.md MUST state that seeing all-skips output is
+   the signal the gate is off. Final mechanism (env var vs feature) may be
+   revisited during implementation if ergonomics say otherwise.
+2. ~~CI fuzz smoke-run duration~~ — RESOLVED 2026-09-22 (owner decision):
+   60–120 s bounded run per PR, corpus committed. Tune in practice.
+3. ~~T2 matrix enforcement~~ — RESOLVED 2026-09-22 (owner decision): test
+   names match scenario IDs (M1–M17) in the spec; enforcement by review
+   for v1.

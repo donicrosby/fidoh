@@ -179,12 +179,11 @@ docs/errors.md gives the operator the live commands
 
 ## Open Questions
 
-- OQ-1: Should `AmbiguousDevice` also carry a remediation hint
-  (e.g. "pass an explicit SelectionPolicy")? Currently the ten-variant
-  diagnostics rule covers `NoDevice` and channel-open failures only;
-  `AmbiguousDevice` is arguably operator-facing too. Left to the
-  implementation change-set; the spec's SHOULD-scope is deliberately
-  narrow.
+- ~~OQ-1~~ RESOLVED 2026-09-22 (owner decision): **`AmbiguousDevice` DOES
+  carry a remediation hint** (e.g. "unplug the extra authenticator, or pass
+  an explicit selection policy"). It is operator-facing exactly like
+  `NoDevice`; the diagnostics SHOULD-scope now covers `NoDevice`,
+  channel-open failures, and `AmbiguousDevice`.
 - OQ-2: Exact truncation rule for credential IDs in `CredentialMismatch`
   diagnostics (byte count vs. hex prefix length). The spec pins
   "truncated" and "never full credential material"; the precise
