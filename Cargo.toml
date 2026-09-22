@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = []
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/donicrosby/fidoh"
+
+# Core invariants enforced workspace-wide:
+# - No tokio/async-std/smol in core crates (runtime-agnostic).
+# - deny(unsafe_code) per-crate unless explicitly justified in design.md.
+# - No unwrap/expect outside tests.
