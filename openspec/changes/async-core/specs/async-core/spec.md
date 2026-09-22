@@ -71,9 +71,13 @@ signals, not errors, until the deadline expires.
 #### Scenario: Close releases the device
 
 - **WHEN** a caller closes a device or drops the device future
-- **THEN** the channel is released or abandoned per CTAP2.1 §8.1.4
-  channel lifetime rules and a subsequent `connect` to the same
-  authenticator succeeds (worst case after one INIT re-handshake)
+- **THEN** the device SHALL make a best-effort attempt to release the
+  channel (CTAP2.1 §8.1.4 channel lifetime rules); if the release attempt
+  itself fails or the deadline has already expired, the error is
+  swallowable, but the attempt is mandatory — an authenticator left holding
+  an allocated channel blocks every other client until the key's channel
+  timeout expires. A subsequent `connect` to the same authenticator SHALL
+  succeed (worst case after one INIT re-handshake)
 
 ### Requirement: Ceremony trait for orchestration entry
 

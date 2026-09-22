@@ -209,12 +209,22 @@ the trait definition, since `fidoh-tokio`'s `spawn_blocking` requires
 
 ## Open Questions
 
-- OQ-1: Minimum supported Rust version for the workspace (RPITIT needs
-  ≥1.75; precise pin deferred to the implementation change-set).
-- OQ-2: Exact CTAPHID per-wait slice default (30 s proposed) — confirm
-  against live hardware probes of user-presence latency before
-  freezing (allowed evidence source 3).
-- OQ-3: Whether `Device::close` must attempt a CTAPHID channel release
-  on drop-cancel, or whether channel abandonment is sufficient per
-  CTAP2.1 §8.1.4 channel lifetime rules. No standards text found yet;
-  flagged rather than invented (cleanroom rule).
+- ~~OQ-1~~ RESOLVED 2026-09-22 (owner decision): **MSRV is pinned at Rust 1.75.**
+  Rationale: RPITIT (return-position `impl Trait` in traits) requires ≥1.75
+  and is a core design decision (D1/A4); pinning unlocks those efficiencies
+  (no boxed futures on the ceremony hot path, visible `+ Send` bounds).
+  Workspace MUST declare `rust-version = "1.75"` in the root `Cargo.toml`
+  and CI MUST compile/test on exactly 1.75 plus stable.
+- ~~OQ-2~~ RESOLVED 2026-09-22 (owner decision): **CTAPHID per-wait slice
+  default is 30 s, as a tunable named constant.** It is a crate-public
+  const (e.g. `DEFAULT_WAIT_SLICE`), overridable per-ceremony by the
+  caller; 30 s is the default, not a hard-coded literal scattered through
+  the transport. Live-hardware probes may refine the default later, but 30 s
+  is the spec'd starting value.
+- ~~OQ-3~~ RESOLVED 2026-09-22 (owner decision): **`Device::close` (and
+  drop-cancellation) MUST attempt to release the channel/device.** An
+  authenticator left holding an allocated channel blocks every other client
+  (browser, other CLI) until the key's channel timeout expires. On
+  drop-cancel the device MUST send a best-effort channel-release/close; if
+  the release itself fails or the deadline has already passed, the error is
+  logged and swallowable, but the attempt is mandatory, not optional.
