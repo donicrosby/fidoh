@@ -11,10 +11,10 @@ repository.workspace = true
 unsafe_code = "deny"
 
 [dependencies]
-serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-serde_bytes = "0.11"
-serde_cbor = "0.11"
-thiserror = { version = "1", default-features = false }
+# Intentionally dependency-free runtime: canonical CBOR is hand-rolled
+# (serde_cbor cannot enforce CTAP2.1 §8 sorted keys / indefinite-length
+# rejection) and errors use manual Display impls (thiserror is std-only
+# on MSRV 1.75). See openspec/changes/core-model/design.md.
 
 [dev-dependencies]
 hex = "0.4"
