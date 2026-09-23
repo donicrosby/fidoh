@@ -13,7 +13,7 @@ the API shape, not captured from a running system).
 
 | CTAP2 command | Status | Notes |
 |---|---|---|
-| authenticatorGetInfo | ✅ | Pinned AAGUID; versions `FIDO_2_0`, `FIDO_2_1`; options `rk`/`up`/`uv` (CTAP2.1 §6.4) |
+| authenticatorGetInfo | ✅ | Pinned AAGUID = `66 69 64 6F 68 2D 73 6F 66 74 2D 74 6F 6B 65 6E` (`b"fidoh-soft-token"`, 16 ASCII bytes — authoritative value for this crate); versions `FIDO_2_0`, `FIDO_2_1`; options `rk`/`up`/`uv` (CTAP2.1 §6.4) |
 | authenticatorMakeCredential | ✅ internal only | Harness method on the concrete type; **not** in the client-facing API (CTAP2.1 §6.1) |
 | authenticatorGetAssertion | ✅ | Real ECDSA P-256 signatures over `authenticatorData \|\| clientDataHash` (CTAP2.1 §6.2.2, WebAuthn L2 §6.5) |
 
@@ -76,11 +76,11 @@ pending.await??;
 | `up_mode` | `auto-approve` \| `always-fail` \| `require-explicit-poke` | `auto-approve` | Controls UP check and flags bit 0 |
 | `uv_mode` | same modes | `auto-approve` | Controls UV check and flags bit 2 |
 | `inject_status` | CTAP status code (CTAP2.1 §8.2) | none | Next matching command returns this status |
-| `keepalive_sequence` | `[(status_byte, spacing_ms), ...]` | none | Keepalive events emitted before the final response |
-| `delay_beyond_deadline` | bool / duration | off | Final response delayed past caller deadline (hard cap: deadline + 60 s) |
+| `keepalive_sequence` | `[(status_byte, spacing), ...]` | none | Keepalive events emitted before the final response. Spacing is consumed from the caller's `Deadline` budget, not wall-clock: each event consumes its spacing from the remaining budget; exhaustion → typed `Timeout` |
+| `delay_beyond_deadline` | bool / duration | off | Final response delayed past caller deadline (hard cap: deadline + 60 s; the overshoot consumes budget the same way) |
 | `wrong_credential_id` | bool | off | Assertion signed under a different stored credential ID |
 | `initial_sign_count` | u32 | 0 | Starting value of the global signature counter |
-| `rng` | `csprng` \| `deterministic(seed)` | `csprng` | Deterministic mode is for committed fixtures only |
+| `rng` | `csprng` \| `deterministic(seed)` | build-salted deterministic | Default is injectable and deterministic (seeded from a build-time salt) to keep the crate `no_std` — OS entropy requires the `std` feature. `deterministic(seed)` mode is for committed fixtures; both modes are replaceable via `RngSource` |
 | `persistent_knobs` | bool | false | If false, injection knobs reset after firing once |
 
 ## authenticatorData quick reference

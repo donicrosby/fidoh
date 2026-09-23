@@ -33,7 +33,16 @@ use core::time::Duration;
 /// cancels only that one wait.
 pub trait Sleep {
     /// Produce a future completing after `duration`.
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>>;
+    ///
+    /// The future is `Send`: a wait may be held across an await point in
+    /// any [`Device`](crate::device::Device) or
+    /// [`Ceremony`](crate::ceremony::Ceremony) future, and those futures
+    /// are `Send` by design (async-core A4), which transitively requires
+    /// every awaited future to be `Send`. A non-`Send` timer (e.g. one
+    /// pinning to the constructing thread via thread-local state) must
+    /// spawn/bridge onto a `Send` handle inside its `sleep`
+    /// implementation rather than returning a thread-bound future.
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
 /// The reference every wait-driven API accepts: a shared handle to an
@@ -48,13 +57,13 @@ pub trait Sleep {
 pub type SleepHandle<'a> = &'a (dyn Sleep + Send + Sync);
 
 impl Sleep for alloc::sync::Arc<dyn Sleep + Send + Sync> {
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         (**self).sleep(duration)
     }
 }
 
 impl Sleep for alloc::boxed::Box<dyn Sleep + Send + Sync> {
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         (**self).sleep(duration)
     }
 }

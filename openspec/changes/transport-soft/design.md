@@ -88,5 +88,18 @@ CI produce credential fixtures with real keys.
    transport changes already answered the framing per transport
    (transport-hid: CTAPHID 0x01/0x02 status bytes per CTAP2.1 §11.2.9.1.7;
    transport-pcsc: APDU-layer progress signals). Nothing left to decide.
-3. Does the snapshot format need a version field for forward compatibility?
-   Spec includes one; confirm serde format (JSON vs CBOR) at implementation.
+3. ~~Does the snapshot format need a version field for forward compatibility?
+   Spec includes one; confirm serde format (JSON vs CBOR) at implementation.~~
+   — RESOLVED 2026-09-22 (implementation crystallization): **JSON, version
+   field `SNAPSHOT_VERSION = 1`, hex-encoded byte fields**, import of foreign
+   versions is a typed rejection. serde/serde_json are behind the optional
+   `snapshot` feature so the default build stays dependency-light.
+4. ~~Implementation notes (2026-09-22)~~: pinned AAGUID is documented in
+   docs/transport-soft.md as `b"fidoh-soft-token"` (16 ASCII bytes);
+   default RNG is injectable build-salted deterministic (`RngSource`),
+   `std` feature gates OS entropy; keepalive spacing and
+   delay-beyond-deadline consume the caller's `Deadline` budget
+   (budget-driven, not wall-clock) per async-core OQ-4; `getInfo` reports
+   `uv: true` unless `up_mode`/`uv_mode` is `always-fail`; getNextAssertion
+   drain is exposed as a `SoftDevice` harness method (client-side drain is
+   ceremony-scope, not transport-scope).

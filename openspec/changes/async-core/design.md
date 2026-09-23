@@ -228,3 +228,12 @@ the trait definition, since `fidoh-tokio`'s `spawn_blocking` requires
   drop-cancel the device MUST send a best-effort channel-release/close; if
   the release itself fails or the deadline has already passed, the error is
   logged and swallowable, but the attempt is mandatory, not optional.
+- ~~OQ-4~~ RESOLVED 2026-09-22 (implementation crystallization): **`Sleep`
+  futures are `Send`.** `Sleep::sleep` returns
+  `Pin<Box<dyn Future<Output = ()> + Send>>` — a wait may be held across an
+  await point inside any `Device`/`Ceremony` future, and those futures are
+  `Send` by design (A4), which transitively requires every awaited future to
+  be `Send`. The soft token's budget-driven device (spacing consumed from
+  the shared `Deadline`, never wall-clock) needs no real timer; the tokio
+  adapter's `spawn_blocking`-side waits are `Send` naturally. A thread-bound
+  timer must bridge to a `Send` handle inside its `sleep` impl.

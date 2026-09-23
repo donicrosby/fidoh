@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fidoh-core"]
+members = ["crates/fidoh-core", "crates/fidoh-transport-soft"]
 
 [workspace.package]
 edition = "2021"

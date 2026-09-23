@@ -1,0 +1,42 @@
+[package]
+name = "fidoh-transport-soft"
+description = "In-process virtual CTAP2 authenticator (ES256) — the fidoh CI harness implementing the same Transport/Device traits as hardware transports"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[features]
+# The crate is no_std + alloc by default. `std` (implied by `snapshot`)
+# exists only for snapshot I/O and harness ergonomics; entropy is
+# injectable via `DeterministicRng`, so no std-only OS entropy is ever
+# required (see src/lib.rs "Entropy" note).
+default = ["snapshot"]
+snapshot = ["std", "dep:serde", "dep:serde_json"]
+std = ["p256/std", "serde/std", "serde?/alloc"]
+
+[dependencies]
+fidoh-core = { path = "../fidoh-core" }
+# ES256 (ECDSA P-256 + SHA-256) in pure Rust, no_std-capable, zero C
+# toolchains. Chosen over `ring` (std-only, C/assembly backend) and a
+# hand-rolled signer (never acceptable for real signatures).
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256", "alloc", "arithmetic"] }
+sha2 = { version = "0.10", default-features = false }
+# no_std mutex for the shared authenticator core (std::sync::Mutex
+# would drag std into the default build).
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
+# Versioned credential-store snapshots (design OQ-3: JSON chosen over
+# CBOR for readability of committed fixtures; the wire format inside
+# stays canonical CBOR via fidoh-core).
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+serde_json = { version = "1", optional = true, default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+hex = "0.4"
+# Verifying the token's signatures inside tests (same version as the
+# lib dependency).
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }

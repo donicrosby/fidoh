@@ -85,7 +85,7 @@ impl Future for FakeSleep {
 }
 
 impl Sleep for FakeClock {
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let now = self.now.load(Ordering::Relaxed);
         let at = now.saturating_add(duration.as_nanos() as u64);
         Box::pin(FakeSleep {
