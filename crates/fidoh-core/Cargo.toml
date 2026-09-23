@@ -1,6 +1,6 @@
 [package]
 name = "fidoh-core"
-description = "CTAP2 data model, canonical CBOR, and status codes — cleanroom, no_std-friendly core of fidoh"
+description = "CTAP2 data model, canonical CBOR, status codes, and the async trait layer — cleanroom, no_std-friendly core of fidoh"
 version = "0.1.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,29 @@ unsafe_code = "deny"
 # (serde_cbor cannot enforce CTAP2.1 §8 sorted keys / indefinite-length
 # rejection) and errors use manual Display impls (thiserror is std-only
 # on MSRV 1.75). See openspec/changes/core-model/design.md.
+#
+# async-core design D5: "No feature may add a dependency to
+# `fidoh-core`" — this section must remain empty.
 
 [dev-dependencies]
 hex = "0.4"
+
+[features]
+# async-core design D5 feature-flag layout. Workspace-level switches:
+# the default build compiles only the soft transport (zero OS device
+# APIs); `hid`, `pcsc`, and `tokio` are opt-in and enable the sibling
+# crates `fidoh-transport-hid`, `fidoh-transport-pcsc`, and
+# `fidoh-tokio` respectively.
+#
+# The sibling crates do not exist yet (they arrive with the
+# transport-soft / transport-hid / transport-pcsc / fidoh-tokio
+# change sets), so these flags are feature MARKERS: they carry no
+# dependencies here and become `dep:` edges in the WORKSPACE root
+# manifest once the siblings land. The stack invariant that no feature
+# ever adds a dependency to `fidoh-core` is enforced by review of the
+# empty [dependencies] section above.
+default = ["soft"]
+soft = []
+hid = []
+pcsc = []
+tokio = []

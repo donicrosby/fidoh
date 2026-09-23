@@ -7,7 +7,11 @@
 //! beyond the workspace MSRV of 1.75. `Display` is implemented manually.
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt;
+
+use crate::time::Phase;
+use crate::transport::{CandidateDescriptor, DeviceId};
 
 /// Decode posture over CTAP2.1 §8 (design D1).
 ///
@@ -237,5 +241,93 @@ impl fmt::Display for InvalidRequest {
                 "empty allowList MUST be omitted, not sent (CTAP2.1 §6.2)"
             ),
         }
+    }
+}
+
+/// The async-core transport/orchestration error taxonomy
+/// (async-core spec, "Typed errors extending the existing error.rs house
+/// style"; ceremony-layer mappings live in the ceremony change).
+///
+/// Distinct from the wire-level [`DecodeError`]/[`EncodeError`] pairs:
+/// these variants surface at the `Transport`/`Device`/`Ceremony` trait
+/// boundaries. Display is manual (thiserror is std-only on MSRV 1.75 —
+/// see the module header).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Error {
+    /// A wait exceeded its deadline. Carries the ceremony phase that
+    /// expired (async-core spec: single-budget timeout model — "Expiry
+    /// at any hop SHALL return a typed `Error::Timeout` naming the
+    /// ceremony phase").
+    Timeout(Phase),
+    /// Enumeration found multiple candidates and the caller's selection
+    /// policy was `Fail` (the default). Carries every candidate so the
+    /// caller can disambiguate (async-core spec: "ambiguity SHALL
+    /// surface as a typed `AmbiguousDevice` error listing candidates";
+    /// stack invariant: never silently pick).
+    AmbiguousDevice(Vec<CandidateDescriptor>),
+    /// The supplied device identifier did not match any candidate the
+    /// transport currently enumerates.
+    UnknownDevice(DeviceId),
+    /// The transport or device failed an underlying I/O or framing
+    /// operation. The boxed string carries transport-specific detail
+    /// (never a bare string error at a call site — this is the payload).
+    Transport(TransportError),
+    /// The device closed the channel or disappeared mid-operation.
+    DeviceGone,
+    /// The channel identifier the device supplied on a previous
+    /// operation is no longer valid (e.g. after cancellation and
+    /// re-handshake, CTAP2.1 §8.1.4 channel lifetime).
+    ChannelClosed,
+    /// The transport rejected an operation on this device that another
+    /// operation still holds (busy/locked, CTAP2.1 §8.1.3 channel
+    /// locking semantics).
+    Busy,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Timeout(phase) => write!(f, "deadline exceeded during {phase} phase"),
+            Self::AmbiguousDevice(candidates) => {
+                write!(f, "multiple candidate devices; selection required:")?;
+                for c in candidates {
+                    write!(f, " {c}")?;
+                }
+                Ok(())
+            }
+            Self::UnknownDevice(id) => {
+                write!(f, "no device matches identifier {id}")
+            }
+            Self::Transport(e) => write!(f, "transport I/O failure: {e}"),
+            Self::DeviceGone => write!(f, "device disappeared mid-operation"),
+            Self::ChannelClosed => write!(f, "device channel closed or no longer valid"),
+            Self::Busy => write!(f, "device busy with another operation"),
+        }
+    }
+}
+
+/// Transport-specific I/O/framing failure detail.
+///
+/// `kind` names the transport layer (e.g. `"hid"`, `"pcsc"`, `"soft"`);
+/// `detail` carries the human-readable cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransportError {
+    /// Which transport layer produced the failure.
+    pub kind: &'static str,
+    /// Human-readable cause (typed carriers are added per-transport in
+    /// their own crates; core keeps the diagnostic string).
+    pub detail: String,
+}
+
+impl TransportError {
+    /// Build a transport error for `kind` from a human-readable cause.
+    pub fn new(kind: &'static str, detail: String) -> Self {
+        Self { kind, detail }
+    }
+}
+
+impl fmt::Display for TransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.kind, self.detail)
     }
 }
