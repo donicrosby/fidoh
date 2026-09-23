@@ -255,3 +255,40 @@ blocking read without a deadline-driven abort path (async-core D4).
   D7 alternative: implement the minimal usage-page/usage parser now,
   consider consuming systemd's tagging later. *Status: open,
   implementation-phase decision.*
+
+## Implementation crystallization (2026-09-23, from the first implementation)
+
+Decisions made design-silently while implementing against this spec,
+now binding for v1:
+
+1. **INIT nonce source is an incrementing `AtomicU64` counter** —
+   §11.2.9.1.3 requires only that the response echoes the request
+   nonce; unpredictability adds nothing against a local device.
+2. **Busy-retry delay is a crate-public constant**
+   (`BUSY_RETRY_DELAY = 50 ms`), tunable per the same convention as
+   async-core's `DEFAULT_WAIT_SLICE`; ERR_CHANNEL_BUSY retries are
+   bounded by the caller budget.
+3. **Malformed report descriptors surface as per-node enumeration
+   diagnostics** (same channel as unreadable sysfs files), never
+   enum-wide failure — D7's no-filter stance covers hostile/broken
+   descriptors too.
+4. **OQ-4 discharged (implementation-phase decision made):** the
+   hand-rolled usage-page/usage parser IS the v1 mechanism — real
+   short-item encoding, Push/Pop stack, extended 32-bit usages,
+   output-report-size extraction for SET_REPORT sizing. An initial
+   tag-decoding mistake was caught by tests and fixed; the fido_id
+   alternative stays deferred until live comparison shows a need.
+5. **OQ-1 implementation stance:** reassembly gap and transaction
+   waits are bounded solely by the caller budget (no invented
+   device-side timeout); OQ-1 stays open for live-probe recording.
+6. **Keepalive → timeout-phase renaming** follows the ceremony
+   crystallized rule (async-core OQ-4 / ceremony OQ-5): UP seen →
+   `Timeout(UserPresence)`, else `Timeout(GetAssertion)`.
+
+Live-hardware probe queue (instruments already committed as
+`tests/probes.rs` P1–P6, behind FIDOH_HARDWARE_TESTS=1):
+OQ-2 keepalive cadence, OQ-3 CANCEL-via-write on SET_REPORT-only
+devices (+ recovery after CANCEL), output-report-size vs actual
+SET_REPORT sizing, reserved-capability-bit sightings, OQ-1 observed
+device-side transaction timeout. These are the evidence-class-3 items
+that close the OQs; code changes only if probes contradict v1 stances.

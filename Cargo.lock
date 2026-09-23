@@ -147,6 +147,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fidoh-transport-hid"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "fidoh-core",
+ "hex",
+]
+
+[[package]]
 name = "fidoh-transport-pcsc"
 version = "0.1.0-alpha.1"
 dependencies = [

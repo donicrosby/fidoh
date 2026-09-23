@@ -1,0 +1,29 @@
+[package]
+name = "fidoh-transport-hid"
+description = "CTAPHID over Linux hidraw (CTAP2.1 §11.2) — the fidoh USB HID transport implementing the same Transport/Device traits as the soft token"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+# Std-only crate (file I/O for /dev/hidrawN nodes and sysfs attributes).
+# Deliberately dependency-free otherwise: packet encode/decode, the HID
+# report-descriptor parser, and the sysfs walk are all hand-rolled per
+# the stack's no-runtime-deps invariant. No libudev (design D7), no libc
+# (open flags are named Linux constants, documented in fd.rs).
+fidoh-core = { path = "../fidoh-core" }
+
+[dev-dependencies]
+hex = "0.4"
+
+[features]
+# No optional features in v1: the crate is always std, and the
+# hardware-gated probes (FIDOH_HARDWARE_TESTS=1, docs/testing.md T3)
+# are env-gated tests, not a cargo feature, so they compile with zero
+# features enabled.
+default = []
