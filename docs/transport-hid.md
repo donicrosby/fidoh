@@ -75,7 +75,9 @@ before writing anything.
 ## Channel allocation — worked example (constructed)
 
 Step 1. The host has no channel yet, so it uses the broadcast CID
-`0xFFFFFFFF` and generates a random 8-byte nonce
+`0xFFFFFFFF` and generates a fresh 8-byte nonce (v1 implementation:
+an incrementing `AtomicU64` counter — §11.2.9.1.3 requires only that
+the response echo the request nonce, not that it be unpredictable)
 `01 02 03 04 05 06 07 08`.
 
 Step 2. The host writes one init packet (57-byte payload area; the

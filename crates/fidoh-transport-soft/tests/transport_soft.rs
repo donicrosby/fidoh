@@ -239,14 +239,38 @@ fn no_executor_dependency() {
     // The crate itself is no_std + alloc by default (see lib.rs); this
     // std-only test binary links it, which is only possible because no
     // executor is required. Belt-and-braces: the workspace lockfile
-    // must carry no tokio/async-std/smol packages at all.
+    // must carry no tokio/async-std/smol packages EXCEPT through the
+    // fidoh-tokio adapter — the ONLY crate allowed to name tokio
+    // (async-core design D2 rule 3; async-core spec: "only
+    // `fidoh-tokio` SHALL name tokio as a dependency"). No other
+    // package (in particular none of the core/transport crates) may
+    // depend on an executor.
     let lock =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap();
     for banned in ["tokio", "async-std", "smol"] {
-        assert!(
-            !lock.contains(&format!("name = \"{banned}\"")),
-            "executor crate {banned} leaked into the workspace"
-        );
+        let present = lock.contains(&format!("name = \"{banned}\""));
+        if banned == "tokio" && present {
+            // Tolerated only as the fidoh-tokio adapter's dependency
+            // edge: tokio (+ its tokio-macros build helper) must not
+            // appear as a dependency of any other workspace package.
+            for pkg in lock.split("[package]") {
+                if pkg.contains("fidoh-tokio") {
+                    continue;
+                }
+                assert!(
+                    !pkg.split("[dependencies]")
+                        .nth(1)
+                        .unwrap_or("")
+                        .contains("tokio"),
+                    "executor crate {banned} leaked into the workspace outside fidoh-tokio"
+                );
+            }
+        } else {
+            assert!(
+                !present,
+                "executor crate {banned} leaked into the workspace"
+            );
+        }
     }
 }
 

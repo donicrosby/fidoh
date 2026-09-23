@@ -1,0 +1,40 @@
+[package]
+name = "fidoh-tokio"
+description = "Tokio adapter for fidoh: the Sleep factory plus the spawn_blocking blocking-call bridge (async-core design D2/D3/D5) — the only fidoh crate allowed to name tokio"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+fidoh-core = { path = "../fidoh-core" }
+# Tokio version pin rationale (async-core OQ-1: workspace MSRV 1.75):
+# tokio declared rust-version 1.70 from 1.47 onward (1.53.x declares
+# 1.71), so the requirement floor "1.47" keeps every satisfying tokio
+# release under the workspace MSRV of 1.75 with headroom. Default
+# features are off: the adapter needs only `rt` (tokio::spawn /
+# spawn_blocking) and `time` (the Sleep timer) — no net, no io, no
+# macros in the library surface.
+tokio = { version = "1.47", default-features = false, features = ["rt", "time"] }
+
+[dev-dependencies]
+# Test-only extras: `macros` for #[tokio::test] (incl. start_paused),
+# `rt-multi-thread` for the Send-bound spawn proof, `sync` for timeouts
+# in cancellation tests, and `test-util` for the paused (deterministic)
+# test clock.
+tokio = { version = "1.47", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "sync",
+    "test-util",
+] }
+# The CI harness transport drives the full ceremony through the adapter
+# (dev-dependency only: the adapter crate itself depends solely on
+# fidoh-core + tokio, per the D2 crate graph).
+fidoh-transport-soft = { path = "../fidoh-transport-soft" }

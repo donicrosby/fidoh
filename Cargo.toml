@@ -5,6 +5,7 @@ members = [
     "crates/fidoh-transport-soft",
     "crates/fidoh-transport-pcsc",
     "crates/fidoh-transport-hid",
+    "crates/fidoh-tokio",
 ]
 
 [workspace.package]
