@@ -135,7 +135,9 @@ dependencies = [
 name = "fidoh-core"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "fidoh-transport-soft",
  "hex",
+ "p256",
 ]
 
 [[package]]

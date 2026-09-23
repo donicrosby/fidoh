@@ -267,3 +267,44 @@ that deserve their own change-set. Flagged as open question OQ-1.
   (b) the error message SHOULD identify the mismatch (returned id vs
   allowed ids, truncated safely); (c) it remains documented here as a
   library-safety rule, not a CTAP2 protocol requirement.
+- ~~OQ-4~~ RESOLVED 2026-09-23 (implementation crystallization): **§6.3
+  continuation seam is a caller-agnostic `Drain` hook, not a `CtapCommand`
+  variant, in v1.** `CtapCommand` (async-core) has no
+  `GetNextAssertion` variant and stays that way: the ceremony's drain is
+  expressed as a `Drain` continuation hook over the device event stream,
+  bounded by the remaining budget (`Timeout(GetNextAssertion)` on
+  expiry), preserving the spec's observable contract (ordered list,
+  §6.2 response first, 0x30 surfaced as `Ctap(0x30)` un-retried). Each
+  transport implements the hook against its own wire (transport-hid:
+  CTAP command 0x08 per CTAP2.1 §6.3). Codified in
+  docs; revisit only if a transport needs first-class command framing.
+- ~~OQ-5~~ RESOLVED 2026-09-23 (implementation crystallization):
+  **Budget-expiry phase naming during the §6.2 hop reflects
+  user-interaction progress, not the underlying command.** Expiry before
+  any keepalive has flowed names `GetAssertion`; expiry after UP_NEEDED
+  (or a keepalive) has flowed names `UserPresence`. Rationale: the name
+  tells the caller where the user was in the ceremony, which is the
+  actionable information; the device contract beneath names command
+  phases and is not user-visible here.
+- ~~OQ-6~~ RESOLVED 2026-09-23 (implementation crystallization):
+  **`DiscoveryDiagnostic.kind` may be approximate in v1; the typed
+  cause is authoritative.** The `Transport` trait does not expose its
+  kind, so the diagnostic's `kind` field defaults to `Soft` for
+  transports that do not self-report; callers needing the true layer
+  read the cause's `TransportError.kind`. Revisit (trait method) when
+  transport-hid/pcsc land if diagnostics prove load-bearing.
+- ~~OQ-7~~ RESOLVED 2026-09-23 (implementation crystallization):
+  **Unsupported pinUvAuthProtocolVersion (§6.5.5) surfaces as
+  `Error::Transport` with a §6.5.5-citing detail; the taxonomy stays
+  closed at 10 variants.** It is a pre-exchange capability mismatch
+  discovered at the mandatory probe, not a transport fault; a dedicated
+  variant would break the closed "every failure path is typed"
+  enumeration for a condition callers can already match via detail.
+- KNOWN HARNESS LIMIT (transport-soft, found 2026-09-23): `uv_mode:
+  always-fail` couples capability advertisement with behavior — it both
+  clears advertised `uv` and rejects getAssertion even without
+  `options.uv`, so "uv-incapable but UP-only succeeds" is not
+  modelable. The wire-degradation path (`Preferred` → `Discouraged`
+  with reported `uv_effective`) is asserted via the happy path until
+  the soft token splits advertisement from behavior (follow-up change,
+  not a ceremony blocker).

@@ -69,9 +69,15 @@ pub mod status;
 pub mod time;
 pub mod transport;
 
-pub use ceremony::Ceremony;
+pub use ceremony::{
+    Ceremony, Drain, GetAssertionCeremony, GetAssertionExchange, GetAssertionOutcome, UvEffective,
+    UvPolicy,
+};
 pub use device::{ChannelId, CtapCommand, Device, DeviceEvent};
-pub use error::{DecodeError, DecodePolicy, EncodeError, Error, InvalidRequest, TransportError};
+pub use error::{
+    CeremonyError, DecodeError, DecodePolicy, DiscoveryDiagnostic, EncodeError, Error,
+    InvalidRequest, TransportError,
+};
 pub use sleep::{Sleep, SleepHandle};
 pub use status::StatusCode;
 pub use time::{Deadline, Phase, DEFAULT_WAIT_SLICE, NFC_POLL_SLICE};

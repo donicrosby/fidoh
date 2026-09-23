@@ -10,8 +10,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::status::StatusCode;
 use crate::time::Phase;
-use crate::transport::{CandidateDescriptor, DeviceId};
+use crate::transport::{CandidateDescriptor, DeviceId, TransportKind};
 
 /// Decode posture over CTAP2.1 §8 (design D1).
 ///
@@ -320,7 +321,7 @@ pub struct TransportError {
 }
 
 impl TransportError {
-    /// Build a transport error for `kind` from a human-readable cause.
+    /// Build a transport error from its kind and human-readable cause.
     pub fn new(kind: &'static str, detail: String) -> Self {
         Self { kind, detail }
     }
@@ -329,5 +330,233 @@ impl TransportError {
 impl fmt::Display for TransportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.kind, self.detail)
+    }
+}
+
+/// One per-transport discovery failure, as carried by
+/// [`CeremonyError::NoDevice`] (ceremony spec: "`NoDevice` carrying
+/// per-transport discovery errors... transport kind plus typed cause").
+///
+/// Diagnostics are also attached to a successful outcome
+/// ([`GetAssertionOutcome::discovery_diagnostics`]
+/// [crate::ceremony::GetAssertionOutcome]) when candidates were found
+/// despite some transports failing — never silently dropped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiscoveryDiagnostic {
+    /// Which transport failed.
+    pub kind: TransportKind,
+    /// The typed discovery cause (async-core `Error` taxonomy).
+    pub cause: Error,
+}
+
+impl DiscoveryDiagnostic {
+    /// Pair a transport kind with its typed discovery cause.
+    pub fn new(kind: TransportKind, cause: Error) -> Self {
+        Self { kind, cause }
+    }
+}
+
+impl fmt::Display for DiscoveryDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.kind, self.cause)
+    }
+}
+
+/// The ceremony-layer error taxonomy (ceremony spec: "exactly these
+/// typed error variants"). Every ceremony failure is one of these
+/// values — never a string, an untyped error, or a panic (stack
+/// invariant). Display is implemented manually (house style: no
+/// thiserror on MSRV 1.75, see the module header).
+///
+/// Mapping from authenticator status codes (CTAP2.1 §8.2 via
+/// core-model), per the ceremony spec table:
+///
+/// | Status | Variant |
+/// |---|---|
+/// | 0x2E `NO_CREDENTIALS`, 0x22 `INVALID_CREDENTIAL` | [`CeremonyError::NoCredentials`] |
+/// | 0x2F `USER_ACTION_TIMEOUT` | [`CeremonyError::UserActionTimeout`] |
+/// | 0x2D `KEEPALIVE_CANCEL` | [`CeremonyError::UserCancelled`] |
+/// | 0x27, 0x3B, 0x33, 0x34, 0x36, 0x37, 0x3C | [`CeremonyError::UpRejected`] |
+/// | everything else | [`CeremonyError::Ctap`] |
+#[derive(Clone, Debug, PartialEq)]
+pub enum CeremonyError {
+    /// Zero candidates across every transport. Carries one diagnostic
+    /// per failing transport (empty when all transports enumerated
+    /// cleanly but found nothing).
+    NoDevice(Vec<DiscoveryDiagnostic>),
+    /// More than one candidate under the default `Fail` policy (or a
+    /// `Select(fn)` that declined every candidate): carries every
+    /// candidate descriptor; `connect` is never invoked.
+    AmbiguousDevice(Vec<CandidateDescriptor>),
+    /// Authenticator-side user-action timeout (0x2F
+    /// CTAP2_ERR_USER_ACTION_TIMEOUT) — distinct from
+    /// [`CeremonyError::Timeout`], which is the caller's budget.
+    UserActionTimeout,
+    /// Pending keepalive cancelled (0x2D CTAP2_ERR_KEEPALIVE_CANCEL).
+    UserCancelled,
+    /// No credential on the authenticator matches (0x2E
+    /// CTAP2_ERR_NO_CREDENTIALS, 0x22 CTAP2_ERR_INVALID_CREDENTIAL).
+    /// Surfaced immediately; the ceremony never retries it.
+    NoCredentials,
+    /// UP/UV refused (0x27 OPERATION_DENIED, 0x3B UP_REQUIRED, and the
+    /// pinUvAuthToken-related 0x33 PIN_AUTH_INVALID, 0x34
+    /// PIN_AUTH_BLOCKED, 0x36 PUAT_REQUIRED, 0x37 PIN_POLICY_VIOLATION,
+    /// 0x3C UV_BLOCKED).
+    UpRejected,
+    /// The caller's single ceremony budget expired; names the expired
+    /// phase (async-core D4 single-budget model).
+    Timeout(Phase),
+    /// Transport I/O or framing failure (async-core `Error`
+    /// taxonomy: `Transport`, `DeviceGone`, `ChannelClosed`, `Busy`,
+    /// and response-decode failures).
+    Transport(TransportError),
+    /// Any other authenticator status, carrying the typed core-model
+    /// status value (CTAP2.1 §8.2). Retriable codes (0x06 CHANNEL_BUSY,
+    /// 0x3F UV_INVALID) surface here immediately — the ceremony never
+    /// retries implicitly (design OQ-1, resolved).
+    Ctap(StatusCode),
+    /// The returned credential id is not in the caller's allow list
+    /// (library-safety rule, design OQ-3). Display identifies the
+    /// mismatch with truncated-safe ids; the full ids are carried here
+    /// for typed consumers.
+    CredentialMismatch {
+        /// The credential id the authenticator returned.
+        returned: Vec<u8>,
+        /// The ids the caller's allow list permits.
+        allowed: Vec<Vec<u8>>,
+    },
+}
+
+impl CeremonyError {
+    /// Map a device/transport [`Error`] onto the ceremony taxonomy.
+    ///
+    /// - `Timeout(phase)` keeps its phase;
+    /// - `AmbiguousDevice` / `UnknownDevice` keep their payloads;
+    /// - `Transport`, `DeviceGone`, `ChannelClosed`, and `Busy` fold
+    ///   into [`CeremonyError::Transport`] (the async-core device-state
+    ///   failures are transport-layer failures from the ceremony's
+    ///   vantage; the cause text is preserved in the
+    ///   [`TransportError`] detail).
+    pub fn from_core(err: Error) -> Self {
+        match err {
+            Error::Timeout(phase) => Self::Timeout(phase),
+            Error::AmbiguousDevice(candidates) => Self::AmbiguousDevice(candidates),
+            Error::UnknownDevice(id) => Self::Transport(TransportError::new(
+                "device",
+                alloc::format!("no device matches identifier {id}"),
+            )),
+            Error::Transport(e) => Self::Transport(e),
+            Error::DeviceGone => Self::Transport(TransportError::new(
+                "device",
+                String::from("device disappeared mid-operation"),
+            )),
+            Error::ChannelClosed => Self::Transport(TransportError::new(
+                "device",
+                String::from("device channel closed or no longer valid"),
+            )),
+            Error::Busy => Self::Transport(TransportError::new(
+                "device",
+                String::from("device busy with another operation"),
+            )),
+        }
+    }
+
+    /// Map a CTAP2 status byte (CTAP2.1 §8.2) to its typed ceremony
+    /// error. `Ok` maps to `None` (success); every other byte maps to
+    /// exactly one variant — no status byte reaches the caller
+    /// untyped.
+    pub fn from_status(status: StatusCode) -> Option<Self> {
+        match status {
+            StatusCode::Ok => None,
+            StatusCode::NoCredentials | StatusCode::InvalidCredential => Some(Self::NoCredentials),
+            StatusCode::UserActionTimeout => Some(Self::UserActionTimeout),
+            StatusCode::KeepaliveCancel => Some(Self::UserCancelled),
+            StatusCode::OperationDenied
+            | StatusCode::UpRequired
+            | StatusCode::PinAuthInvalid
+            | StatusCode::PinAuthBlocked
+            | StatusCode::PuatRequired
+            | StatusCode::PinPolicyViolation
+            | StatusCode::UvBlocked => Some(Self::UpRejected),
+            other => Some(Self::Ctap(other)),
+        }
+    }
+}
+
+impl fmt::Display for CeremonyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoDevice(diag) => {
+                f.write_str("no authenticator found on any transport")?;
+                if diag.is_empty() {
+                    f.write_str(" (no transport reported an error)")
+                } else {
+                    for d in diag {
+                        write!(f, "; {d}")?;
+                    }
+                    Ok(())
+                }
+            }
+            Self::AmbiguousDevice(candidates) => {
+                f.write_str("multiple candidate devices; selection required:")?;
+                for c in candidates {
+                    write!(f, " {c}")?;
+                }
+                Ok(())
+            }
+            Self::UserActionTimeout => {
+                f.write_str("user action timed out on the authenticator (CTAP2_ERR_USER_ACTION_TIMEOUT)")
+            }
+            Self::UserCancelled => {
+                f.write_str("pending operation cancelled (CTAP2_ERR_KEEPALIVE_CANCEL)")
+            }
+            Self::NoCredentials => {
+                f.write_str("no credential on the authenticator matches the request (CTAP2_ERR_NO_CREDENTIALS)")
+            }
+            Self::UpRejected => {
+                f.write_str("user presence/verification refused (CTAP2_ERR_OPERATION_DENIED, UP_REQUIRED, or pin/uv auth failure)")
+            }
+            Self::Timeout(phase) => write!(f, "ceremony budget exceeded during {phase} phase"),
+            Self::Transport(e) => write!(f, "transport I/O failure: {e}"),
+            Self::Ctap(status) => write!(f, "authenticator error: {status}"),
+            Self::CredentialMismatch { returned, allowed } => write!(
+                f,
+                "returned credential id {} is not in the allow list ({})",
+                hex_truncated(returned),
+                HexIdList(allowed),
+            ),
+        }
+    }
+}
+
+/// First-8-byte truncated-safe hex of an id (design OQ-3b: the
+/// CredentialMismatch message identifies ids without printing whole
+/// credential ids into logs).
+fn hex_truncated(bytes: &[u8]) -> alloc::string::String {
+    use alloc::fmt::Write as _;
+    const PREFIX: usize = 8;
+    let mut out = alloc::string::String::new();
+    for b in bytes.iter().take(PREFIX) {
+        let _ = write!(out, "{b:02x}");
+    }
+    if bytes.len() > PREFIX {
+        let _ = write!(out, "…({} bytes)", bytes.len());
+    }
+    out
+}
+
+/// Comma-separated truncated-safe hex list (Display helper for
+/// [`CeremonyError::CredentialMismatch`]).
+struct HexIdList<'a>(&'a [Vec<u8>]);
+
+impl fmt::Display for HexIdList<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, id) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            f.write_str(&hex_truncated(id))?;
+        }
+        Ok(())
     }
 }

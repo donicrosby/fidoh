@@ -21,6 +21,12 @@ unsafe_code = "deny"
 
 [dev-dependencies]
 hex = "0.4"
+# Ceremony tests drive the whole discovery→selection→probe→exchange
+# pipeline through the soft token (dev-dependency only; fidoh-core
+# itself stays dependency-free) and verify returned signatures with
+# real ECDSA (same p256 version as the soft token).
+fidoh-transport-soft = { path = "../fidoh-transport-soft" }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
 
 [features]
 # async-core design D5 feature-flag layout. Workspace-level switches:
