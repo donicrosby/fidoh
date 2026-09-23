@@ -1,0 +1,36 @@
+[package]
+name = "fidoh-transport-pcsc"
+description = "ISO 7816-4 APDU transport over PC/SC — FIDO over CCID and NFC (CTAP2.1 §11) on the shared Transport/Device traits"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[features]
+# The PURE APDU/CTAP framing engine is always compiled and fully
+# CI-tested (no library context needed). `std` exists for tests and
+# the error `std::error::Error` glue.
+default = ["std"]
+std = []
+
+[dependencies]
+fidoh-core = { path = "../fidoh-core" }
+# The PC/SC client binding. Optional: the pure framing engine and all
+# CI tests build without it; only `PcscLibrary` (the real-library
+# wrapper behind the `Library` trait) needs it. design.md resolves the
+# zero-runtime-deps invariant as "exactly one external binding crate,
+# feature-gated behind the library context" — the pure layer never
+# touches it.
+pcsc = { version = "2.9", optional = true, default-features = false }
+
+[dev-dependencies]
+hex = "0.4"
+
+[package.metadata.docs]
+# Note for reviewers: the hardware-gated probes live in tests/hardware.rs
+# and only compile/run when FIDOH_HARDWARE_TESTS=1 (cfg'd, not a cargo
+# feature, so `--all-features` never drags hardware probes into CI).

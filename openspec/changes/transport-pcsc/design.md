@@ -290,3 +290,45 @@ question OQ-2 records it for a future CTAP1-interop change.
   finds drivers that exceed the budget without surfacing cancellable
   states, the D6 abort path may need a driver-level note. *Status:
   open; observable contract is spec'd, driver internals are not.*
+
+## Implementation crystallization (2026-09-23, from the first implementation)
+
+Decisions made design-silently while implementing against this spec,
+now binding for v1:
+
+1. **Zero-runtime-deps resolution**: exactly one external binding —
+   `pcsc 2.9` — behind the `Library` trait (Send+Sync) and a feature
+   gate; the pure APDU/framing layer never touches it. MSRV 1.75 held
+   (`split_last_chunk` is 1.77; used `split_at`).
+2. **Typed skips** ride `Error::Transport` with a stable detail marker
+   (`skip <reader>: not-fido …`); `Transport::enumerate` gains no skip
+   channel in v1. Revisit the trait signature in the
+   error-diagnostics change, which owns diagnostic surfacing.
+3. **Sharing-retry detection** is via a typed detail marker after
+   `PcscError → Error` conversion; sharing retry never escalates.
+4. **SELECT at connect** (§11.3.3, the channel-open hop);
+   `open_channel` re-asserts the logical channel without re-SELECT
+   (traffic discipline per A3).
+5. **Runaway guard**: 61xx GET RESPONSE chains and 9100 poll loops
+   cap at 64 hops, belt-and-braces with the caller budget.
+6. **NFC reader identification is caller-declared metadata**
+   (`with_nfc_readers`) — PC/SC exposes no standard contactless
+   attribute; the APDU layer never branches on it.
+
+Ambiguities met in the spec text, resolved as follows (patch-back to
+spec wording next revision pass):
+
+a. pcsclite returns Ok(empty) — not SCARD_E_NO_READERS_AVAILABLE —
+   when pcscd runs with zero readers; the `no-readers` skip fires only
+   on stacks that surface the code. Harmless divergence, documented.
+b. §11.3.3 `9000` with no version data (non-conformant) is tolerated
+   as `Selected { version: None }`; capability settles at getInfo.
+c. Concurrent `connect`s to one reader are permitted (independent
+   connections); the spec neither rules them in nor out.
+d. `9100` on the initial command vs inside the status-update loop is
+   treated uniformly — one loop.
+
+Live-hardware re-verification queue (OQ-1/OQ-3 evidence class 3):
+fw≥5.8 YubiKey over CCID (SELECT/getInfo), same over NFC T=CL, live
+9100 loop (slow getAssertion), WTX under a real contactless driver,
+sharing-violation retry timing against a concurrent PIV/OATH client.
