@@ -459,9 +459,20 @@ fn only_tokio_adapter_names_tokio() {
             if !is_dep_section || !line.contains("tokio") {
                 continue;
             }
+            // `tokio` as a DEPENDENCY (the runtime itself) may only be
+            // named by the adapter. An edge on the ADAPTER crate is
+            // the sanctioned indirect entry: the D2 exclusivity rule
+            // is about the runtime, not the adapter's name
+            // (fidoh-cli-ui depends on the adapter per its spec
+            // Requirement 3). Match the exact package name — a crate
+            // named `fidoh-tokio-evil` must NOT pass.
+            let name = line.trim_start();
+            let name = name.split([' ', '=', '{', ',']).next().unwrap_or(name);
+            let adapter_edge = name == "fidoh-tokio";
             assert!(
-                is_adapter,
-                "{} names tokio in {section} — only fidoh-tokio may",
+                is_adapter || adapter_edge,
+                "{} names tokio in {section} — only fidoh-tokio (or an \
+                 edge ON fidoh-tokio, the sanctioned entry) may",
                 entry.path().display()
             );
         }
@@ -493,4 +504,49 @@ fn only_tokio_adapter_names_tokio() {
         adapter.contains("[dev-dependencies]"),
         "the soft-token harness edge must stay dev-only"
     );
+}
+
+// --------------------------------------------------------------------
+// Requirement: the adapter owns the runtime entry (`run`) — binary
+// callers get real-timer correctness without writing a runtime path.
+// --------------------------------------------------------------------
+
+/// Scenario: Entry seam — `run` drives a future on a fresh
+/// single-threaded runtime; a real-timer wait fires (2 ms) and the
+/// output crosses back out.
+#[test]
+fn run_drives_a_future_with_real_timers() {
+    let out = fidoh_tokio::run(async {
+        let shared = TokioSleep::shared();
+        shared.sleep(Duration::from_millis(2)).await;
+        u8::from(true)
+    })
+    .expect("plain test thread has no ambient runtime");
+    assert_eq!(out, 1);
+}
+
+/// Scenario: nested entry is a TYPED error, never a panic — a body
+/// already running inside `run` cannot re-enter (the runtime's own
+/// `block_on` would panic; the contract is io::Error instead).
+#[test]
+fn run_rejects_nesting_as_typed_error() {
+    let inner = fidoh_tokio::run(async { fidoh_tokio::run(async {}).err() })
+        .expect("outer entry on a plain test thread");
+    let msg = inner
+        .expect("nested run must fail, not succeed")
+        .to_string();
+    assert!(
+        msg.contains("nesting is not supported"),
+        "typed nesting error must say so, got: {msg}"
+    );
+}
+
+/// Scenario: `run` also refuses under an ambient third-party runtime
+/// (`#[tokio::test]` provides one) — same typed failure, so callers
+/// embedding the CLI in an async host get an error they can render.
+#[tokio::test]
+async fn run_rejects_ambient_runtime_context() {
+    assert!(tokio::runtime::Handle::try_current().is_ok());
+    let err = fidoh_tokio::run(async {}).expect_err("ambient context must be refused");
+    assert!(err.to_string().contains("existing runtime context"));
 }

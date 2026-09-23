@@ -6,6 +6,7 @@ members = [
     "crates/fidoh-transport-pcsc",
     "crates/fidoh-transport-hid",
     "crates/fidoh-tokio",
+    "crates/fidoh-cli-ui",
 ]
 
 [workspace.package]

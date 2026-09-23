@@ -1,0 +1,36 @@
+[package]
+name = "fidoh-cli-ui"
+description = "Reference caller CLI for fidoh: list / info / assert across all transports (fidoh-cli-ui openspec change) — the terminal leaf of the crate graph; nothing may depend on it"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[features]
+# `demo` compiles the soft token in for `assert --demo` (design D5):
+# the full ceremony UX exercisable in CI without hardware. The soft
+# token is deliberately NOT a default transport — it never appears in
+# `list` or in hardware discovery (listing a virtual authenticator
+# next to real tokens invites ceremonies against the wrong device).
+# Build a hardware-only binary with `--no-default-features`.
+default = ["demo"]
+demo = ["dep:fidoh-transport-soft"]
+
+[dependencies]
+fidoh-core = { path = "../fidoh-core" }
+# The runtime adapter (async-core design D2): Sleep factory + blocking
+# bridge. The CLI itself never names the runtime; see src/lib.rs for
+# the entry-seam note and src/exe.rs for the interim driver.
+fidoh-tokio = { path = "../fidoh-tokio" }
+fidoh-transport-hid = { path = "../fidoh-transport-hid" }
+# The real PC/SC binding (feature `pcsc` on the transport crate): the
+# binary talks to real readers; the pure APDU engine underneath stays
+# fake-drivable in tests.
+fidoh-transport-pcsc = { path = "../fidoh-transport-pcsc", features = [
+    "pcsc",
+] }
+fidoh-transport-soft = { path = "../fidoh-transport-soft", optional = true }

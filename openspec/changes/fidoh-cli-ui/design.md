@@ -66,3 +66,27 @@ scripts.
   hex blocks. If scripted consumers appear, a stable machine format
   (`--json` or an exit-pipe protocol) is a v2 decision with its own
   spec revision. *Status: open, non-blocking.*
+
+## Crystallization (2026-09-23, from the first implementation)
+
+1. **`exe` has no hand-rolled executor; the runtime enters once.**
+   The first implementation shipped a std park/unpark pump
+   (`block_on_std`) plus a sync `with_sleep(fn)` seam. That shape is
+   structurally wrong for hardware: nested `block_on` under the
+   seam's `block_on(async { body() })` parked the tokio timer driver
+   in the body's frame, so a real-timer keepalive wait could never
+   fire (found in review; never caught by CI because fake-clock
+   paths never poll a real timer). Deleted: `block_on_std`,
+   `with_sleep`, the pump tests. The binary's subcommand bodies are
+   now async fns wrapped once by `exe::with_run`, which calls
+   `fidoh_tokio::run` — the ceremony future is driven by the
+   runtime's own `block_on`. Runtime-entry failure (nesting/ambient
+   context/build) renders through the normal D6 error path, exit 1.
+2. **The keepalive tap stays `'static`** (`make_prompt_tap` shape
+   unchanged): the ceremony future may outlive the frame that
+   started it; prompt lines buffer in an `Arc<Mutex<Vec<String>>>`
+   and flush to the stderr port on the error path.
+3. **Discovery diagnostics pairing survived the refactor**: both the
+   connect path and the exchange path carry
+   `(CeremonyError, Vec<DiscoveryDiagnostic>)`; the error renderer
+   prints candidates/diagnostics, never silently drops them (D2).

@@ -62,8 +62,40 @@ use fidoh_core::error::{Error, TransportError};
 use fidoh_core::sleep::Sleep;
 use fidoh_core::time::{Deadline, Phase};
 
+/// Test-free imports used by the public surface below.
+use std::future::Future;
+
 pub use fidoh_core::policy::SliceGrant;
 pub use fidoh_core::time::{DEFAULT_WAIT_SLICE, NFC_POLL_SLICE};
+
+// The D2 audit invariant, extended to binary callers: callers never
+// write a runtime path — `run` and `TokioSleep::shared` are the
+// whole caller surface.
+
+/// Run `future` to completion on a fresh single-threaded runtime,
+/// returning its output.
+///
+/// This is the CALLER entry the timer factory requires: [`TokioSleep`]
+/// creates its timer futures lazily inside the runtime's reactor
+/// context, so a process that is not already inside a runtime cannot
+/// drive a fidoh ceremony on real timers without such a seam. The
+/// future is polled by the runtime's own `block_on` loop, so timer
+/// deadlines fire and wake it correctly — including the real-timer
+/// keepalive waits a hardware token produces. Fails with a typed
+/// [`io::Error`] instead of panicking when the caller is already
+/// inside a runtime (nesting is not supported — the runtime's own
+/// `block_on` would panic) or when the runtime cannot be built.
+pub fn run<R: Send>(future: impl Future<Output = R> + Send) -> std::io::Result<R> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return Err(std::io::Error::other(
+            "fidoh-tokio::run called inside an existing runtime context — nesting is not supported",
+        ));
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    Ok(rt.block_on(future))
+}
 
 // --------------------------------------------------------------------
 // The Sleep factory (async-core spec: "Sleep trait as the sole waiting

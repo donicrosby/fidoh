@@ -86,6 +86,25 @@ not an open question — the declared rust-versions already prove it).
    the invariant until then.
 3. `SliceGrant`/`DEFAULT_WAIT_SLICE`/`NFC_POLL_SLICE` are re-exported
    from fidoh-core — the adapter adds no constants of its own.
+4. **The entry seam is async-shaped: `run(future)`, not a sync-body
+   `within(fn)`.** (2026-09-23, orchestrator review of the cli-ui
+   wiring.) The first implementation shipped `within(body: FnOnce)`
+   running the body inline inside `block_on(async { body() })`. Any
+   synchronous caller that pumps futures with its own `block_on`
+   under that seam parks the runtime's timer driver inside `body`'s
+   frame: the first REAL-timer wait (a hardware token's keepalive)
+   can never be woken and hangs. Demo/CI paths never touch real
+   timers, which is why every gate stayed green — the bug was found
+   by reading the wiring, not by a test. `run` now takes the
+   ceremony future itself and drives it with the runtime's own
+   `block_on`, so deadlines fire correctly; the reference CLI
+   (`exe::with_run`) hands each subcommand an async body. The
+   std park/unpark pump was deleted from `exe` (a parked
+   park/unpark waiter can only be woken by construction in tests);
+   nesting/ambient-context entry failures stay typed `io::Error`s.
+   Direct tests: `run_drives_a_future_with_real_timers`,
+   `run_rejects_nesting_as_typed_error`,
+   `run_rejects_ambient_runtime_context`.
 
 ## Open questions
 
