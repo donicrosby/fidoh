@@ -7,7 +7,7 @@
 //! The library is RP-agnostic: the caller supplies the
 //! `clientDataHash`; `clientDataJSON` construction, origin semantics,
 //! and signature verification are the CALLER's responsibility
-//! (WebAuthn L2 §6.5). The ceremony returns raw assertion fields
+//! (WebAuthn L2 §7.2). The ceremony returns raw assertion fields
 //! exactly as decoded from the CTAP2.1 §6.2 response.
 //!
 //! Sequence (ceremony spec, "Ceremony sequence per CTAP2.1 §6.2"):
@@ -29,7 +29,7 @@
 //! hop returns [`CeremonyError::Timeout`] naming the expired phase.
 //! Dropping the ceremony future mid-run is cancellation-safe (the
 //! device remains usable for a subsequent ceremony, worst case after
-//! one channel re-handshake, CTAP2.1 §8.1.4).
+//! one channel re-handshake, CTAP2.1 §11.2.5.3).
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -66,8 +66,8 @@ use crate::transport::{
 pub trait Ceremony {
     /// The typed ceremony output: the raw assertion for getAssertion
     /// (authenticatorData, signature, userHandle, credential id per
-    /// CTAP2.1 §8.2) or the parsed info structure for getInfo
-    /// (CTAP2.1 §8.4).
+    /// CTAP2.1 §6.2) or the parsed info structure for getInfo
+    /// (CTAP2.1 §6.4).
     type Output;
 
     /// Run the ceremony against `device`, bounded by the single
@@ -81,7 +81,7 @@ pub trait Ceremony {
     /// single-budget timeout model). Dropping the returned future
     /// mid-run is safe per the cancellation contract: no poisoned
     /// state, the device remains usable for a subsequent ceremony
-    /// (worst case after one channel re-handshake, CTAP2.1 §8.1.4).
+    /// (worst case after one channel re-handshake, CTAP2.1 §11.2.5.3).
     ///
     /// `D: Send + 'static` is required so the run can be hosted by a
     /// `spawn_blocking`-style adapter (async-core design D3): the

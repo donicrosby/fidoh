@@ -17,7 +17,7 @@ responsibility). CTAP2.1 §6.2 defines authenticatorGetAssertion as a
 single command/response exchange, but the observable ceremony is wider:
 the platform must find an authenticator, pick exactly one, optionally
 probe capabilities with authenticatorGetInfo (CTAP2.1 §6.4), survive the
-user-presence wait (keepalive signaling per CTAP2.1 §8.1.5.1 for HID;
+user-presence wait (keepalive signaling per CTAP2.1 §11.2.9.1.7 for HID;
 the §6.2 exchange itself is transport-neutral), interpret status codes
 per the CTAP2.1 §8.2 table, and — when the authenticator found several
 matching credentials — drain the remaining assertions via
@@ -126,7 +126,7 @@ time; the ceremony never constructs a violating request.
 ### D5: Keepalive / user-presence wait loop
 
 During the getAssertion hop the authenticator may signal "waiting for
-user presence" (CTAPHID KEEPALIVE/UPNEEDED per CTAP2.1 §8.1.5.1; the
+user presence" (CTAPHID KEEPALIVE/UPNEEDED per CTAP2.1 §11.2.9.1.7; the
 soft transport models the same via its keepalive-sequence knob).
 Per async-core, transports surface keepalives as progress signals, not
 errors. The ceremony:
@@ -191,7 +191,7 @@ when the list is non-empty; `None` and `Some([])` both omit key 0x03.
 | Wait | Bound |
 |---|---|
 | Transport enumeration (per transport) | remaining ceremony budget |
-| Device connect / channel open (CTAPHID INIT per CTAP2.1 §8.1.4; APDU SELECT per CTAP2.1 §11) | remaining ceremony budget |
+| Device connect / channel open (CTAPHID INIT per CTAP2.1 §11.2.9.1.3; APDU SELECT per CTAP2.1 §11) | remaining ceremony budget |
 | Optional getInfo probe (per candidate) | remaining ceremony budget |
 | getAssertion response wait, including keepalive/UPNEEDED loop | remaining ceremony budget |
 | Each authenticatorGetNextAssertion hop | remaining ceremony budget |

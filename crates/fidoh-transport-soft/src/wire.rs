@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::auth::AAGUID;
 
-/// SHA-256 of `data` (rpIdHash input per WebAuthn L2 §6.5).
+/// SHA-256 of `data` (rpIdHash input per WebAuthn L2 §6.1).
 pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     let digest = Sha256::digest(data);
     let mut out = [0u8; 32];
@@ -28,12 +28,12 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     out
 }
 
-/// Flag bits per WebAuthn L2 §6.5.
+/// Flag bits per WebAuthn L2 §6.1.
 pub(crate) const FLAG_UP: u8 = 1 << 0;
 pub(crate) const FLAG_UV: u8 = 1 << 2;
 pub(crate) const FLAG_AT: u8 = 1 << 6;
 
-/// Build `authenticatorData` per WebAuthn L2 §6.5: 32-byte rpIdHash,
+/// Build `authenticatorData` per WebAuthn L2 §6.1: 32-byte rpIdHash,
 /// flags byte, 4-byte big-endian signCount, then attested credential
 /// data when `attested` is `Some((credential_id, cose_key))` (AT set;
 /// makeCredential responses only — the soft token emits no extensions,

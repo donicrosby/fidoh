@@ -17,15 +17,15 @@ SAME `Transport`/`Device` traits; this change specifies the software side.
 - `authenticatorMakeCredential` exposed as an INTERNAL harness operation only —
   never part of the client-facing API — that mints ES256 (P-256) keypairs and
   credential source records (CTAP2.1 §6.1; credential source fields per
-  WebAuthn L2 §4).
+  WebAuthn L2 §5.2).
 - `authenticatorGetAssertion` producing real ECDSA P-256 signatures over
   `authenticatorData || clientDataHash` (CTAP2.1 §6.2.2 step 5;
-  WebAuthn L2 §6.5).
+  WebAuthn L2 §6.5.5).
 - Full `authenticatorData` layout spec: rpIdHash (SHA-256), flags byte
   (UP=bit0, UV=bit2, AT=bit6, ED=bit7), 4-byte big-endian signCount, attested
   credential data only in makeCredential responses (WebAuthn L2 §6.5).
 - COSE ES256 public-key encoding (alg -7, crv P-256) for credential sources
-  (RFC 8152 §8, RFC 9053 §7).
+  (RFC 9052 §7, RFC 9053 §7.1).
 - Configurable UP/UV behavior: auto-approve, always-fail, require-explicit-poke.
 - Error-injection knobs: arbitrary CTAP status codes (CTAP2.1 §8.2), keepalive
   sequences before response, response delay beyond the caller deadline,

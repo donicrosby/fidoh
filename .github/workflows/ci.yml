@@ -1,0 +1,92 @@
+# fidoh CI — the gates docs/testing.md promises.
+#
+# Matrix contract (docs/testing.md §CI contract):
+# - fmt + clippy + openspec validate on every commit
+# - default-feature tests (soft token) are the mandatory green tier
+# - all-feature tests cover hid/pcsc/tokio compilation and the
+#   pure-framing pcsc layer
+# - the default-feature test job installs NO PC/SC system library: if
+#   the default build ever grows an OS dependency, the build fails —
+#   the async-core "Default build is OS-dependency-free" scenario,
+#   enforced by the machine
+# - MSRV job pins 1.75 (workspace rust-version)
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: PC/SC headers (all-features build)
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default-soft
+            features: ""
+            pcsclib: false
+          - name: all-features
+            features: --all-features
+            pcsclib: true
+    name: test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: PC/SC headers
+        if: ${{ matrix.pcsclib }}
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+      - run: cargo test ${{ matrix.features }} --workspace
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: Swatinem/rust-cache@v2
+      - name: PC/SC headers
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+      - name: default build (soft only)
+        run: cargo build --locked
+      - name: all-features build
+        run: cargo build --locked --workspace --all-features
+
+  openspec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @fission-ai/openspec@1.13.1
+      - run: openspec validate --all --strict

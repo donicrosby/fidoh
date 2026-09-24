@@ -29,21 +29,9 @@ fidoh-transport-soft = { path = "../fidoh-transport-soft" }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
 
 [features]
-# async-core design D5 feature-flag layout. Workspace-level switches:
-# the default build compiles only the soft transport (zero OS device
-# APIs); `hid`, `pcsc`, and `tokio` are opt-in and enable the sibling
-# crates `fidoh-transport-hid`, `fidoh-transport-pcsc`, and
-# `fidoh-tokio` respectively.
-#
-# The sibling crates do not exist yet (they arrive with the
-# transport-soft / transport-hid / transport-pcsc / fidoh-tokio
-# change sets), so these flags are feature MARKERS: they carry no
-# dependencies here and become `dep:` edges in the WORKSPACE root
-# manifest once the siblings land. The stack invariant that no feature
-# ever adds a dependency to `fidoh-core` is enforced by review of the
-# empty [dependencies] section above.
-default = ["soft"]
-soft = []
-hid = []
-pcsc = []
-tokio = []
+# The feature matrix lives in the WORKSPACE ROOT facade package (spec:
+# "Feature-flag layout with soft transport as default"). fidoh-core
+# carries no switches of its own — default = [] — and its
+# [dependencies] section above stays empty: no feature anywhere in the
+# workspace may add a dependency to fidoh-core (design D5).
+default = []

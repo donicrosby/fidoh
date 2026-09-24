@@ -46,19 +46,19 @@ pub enum Phase {
     /// `Transport::connect` (async-core spec, "Connect with deadline"
     /// scenario).
     Connect,
-    /// Channel open (CTAPHID INIT per CTAP2.1 §8.1.4, or APDU SELECT
+    /// Channel open (CTAPHID INIT per CTAP2.1 §11.2.9.1.3, or APDU SELECT
     /// per CTAP2.1 §11).
     ChannelOpen,
     /// A CTAP command exchange (e.g. authenticatorGetInfo, CTAP2.1
-    /// §8.4).
+    /// §6.4).
     CommandExchange,
     /// The user-presence wait, bounded by the remaining budget
     /// (async-core spec: "the ceremony returns `Error::Timeout` naming
     /// the user-presence phase").
     UserPresence,
-    /// authenticatorGetAssertion exchange (CTAP2.1 §8.2).
+    /// authenticatorGetAssertion exchange (CTAP2.1 §6.2).
     GetAssertion,
-    /// authenticatorGetInfo exchange (CTAP2.1 §8.4).
+    /// authenticatorGetInfo exchange (CTAP2.1 §6.4).
     GetInfo,
     /// authenticatorGetNextAssertion drain (CTAP2.1 §6.3; named by the
     /// ceremony change).

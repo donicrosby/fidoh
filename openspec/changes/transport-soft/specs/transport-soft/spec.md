@@ -4,7 +4,7 @@ This change ADDS the new capability `transport-soft`: an in-process virtual
 CTAP2 authenticator used as the CI harness for the fidoh client library.
 
 Normative references: FIDO CTAP 2.1 (fidoalliance.org), W3C WebAuthn Level 2,
-RFC 8152 (CBOR Object Signing and Encryption), RFC 9053 (COSE algorithm
+RFC 9052 (CBOR Object Signing and Encryption), RFC 9053 (COSE algorithm
 registrations).
 
 ## ADDED Requirements
@@ -64,7 +64,7 @@ CTAP2.1 §6.1 as an INTERNAL harness operation only: it SHALL be reachable via
 a method on the concrete soft-token type and SHALL NOT be part of the
 client-facing `Device`/client API surface. Each invocation SHALL mint a fresh
 ES256 (ECDSA P-256) keypair, generate a new credential ID, and persist a
-credential source record (WebAuthn L2 §4: type public-key, private key,
+credential source record (WebAuthn L2 §5.2: type public-key, private key,
 rpId, userHandle) in the credential store. The response SHALL include
 attested credential data (fmt `none`, WebAuthn L2 §8.7).
 
@@ -87,7 +87,7 @@ attested credential data (fmt `none`, WebAuthn L2 §8.7).
 The software token SHALL implement `authenticatorGetAssertion` per
 CTAP2.1 §6.2 and produce a real ECDSA P-256 signature computed over the byte
 concatenation `authenticatorData || clientDataHash` (CTAP2.1 §6.2.2 step 5;
-WebAuthn L2 §6.5 "signature" generation). The signature SHALL be ASN.1 DER
+WebAuthn L2 §6.5.5 "signature" generation). The signature SHALL be ASN.1 DER
 encoded and SHALL verify against the public key of the credential source
 selected for the assertion.
 
@@ -107,7 +107,7 @@ selected for the assertion.
 ### Requirement: authenticatorData layout
 
 All responses from the software token SHALL construct `authenticatorData`
-exactly per WebAuthn L2 §6.5: 32-byte rpIdHash = SHA-256(rpId); one flags
+exactly per WebAuthn L2 §6.1: 32-byte rpIdHash = SHA-256(rpId); one flags
 byte with UP = bit 0, UV = bit 2, AT = bit 6, ED = bit 7 (all other bits
 zero); a 4-byte big-endian signCount; attested credential data present ONLY
 in makeCredential responses (AT set); extension data present only when ED is
@@ -131,7 +131,7 @@ set (the soft token emits no extensions in v1, so ED SHALL always be 0).
 ### Requirement: COSE ES256 public key encoding
 
 Credential source records and attested credential data SHALL encode the
-public key as a COSE_Key per RFC 8152 §8 with parameters per RFC 9053 §7.1:
+public key as a COSE_Key per RFC 9052 §7 with parameters per RFC 9053 §7.1:
 `kty` (1) = 2 (EC2), `alg` (3) = −7 (ES256), `crv` (−1) = 1 (P-256),
 `x` (−2) = 32-byte x coordinate, `y` (−3) = 32-byte y coordinate. No other
 COSE key parameters SHALL be emitted.

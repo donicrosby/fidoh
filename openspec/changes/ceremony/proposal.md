@@ -27,7 +27,7 @@ selection".
   path/handle, AAGUID if a getInfo probe ran).
 - Specify the **ceremony inputs**: `rpId`, caller-supplied
   `clientDataHash` (RP boundary rule — the library never constructs
-  `clientDataJSON`; WebAuthn L2 §6.5 is the RP's responsibility),
+  `clientDataJSON`; WebAuthn L2 §7.2 is the RP's responsibility),
   optional `allowCredentials` (an empty allowList MUST be omitted on the
   wire per CTAP2.1 §6.2, as modeled in core-model), a user-verification
   policy, no extensions in v1 (appid and hmac-secret explicitly out of

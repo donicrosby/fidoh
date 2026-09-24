@@ -263,7 +263,7 @@ with the typed `Timeout` naming the user-presence (or processing)
 phase. An unbounded keepalive wait is a spec violation (async-core
 Sleep requirement: "An unbounded wait is a spec violation"). Upon
 receiving a keepalive the transport SHALL NOT resend the request
-(§11.4.9 client rule, applied to HID by §11.2's identical
+(the §11.4.9 BLE client rule, carried over to HID by analogy: §11.2.9.1.7 defines keepalives but states no resend rule
 transaction model).
 
 #### Scenario: Up-needed keepalives surface as progress until response

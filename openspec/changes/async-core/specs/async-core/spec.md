@@ -45,7 +45,7 @@ required only for `Sleep`.
 
 The system SHALL define a `Device` trait in `fidoh-core` exposing:
 sending a CTAP command and receiving its response, opening a channel
-(CTAPHID INIT negotiation per CTAP2.1 §8.1.4 for HID; APDU SELECT of
+(CTAPHID INIT negotiation per CTAP2.1 §11.2.9.1.3 for HID; APDU SELECT of
 the FIDO application per CTAP2.1 §11 for PC/SC), and closing the
 device. Every `Device` operation SHALL accept a deadline derived from
 the ceremony budget and SHALL return a typed error on failure.
@@ -56,7 +56,7 @@ signals, not errors, until the deadline expires.
 #### Scenario: Send command and receive response within deadline
 
 - **WHEN** a caller sends a CTAP command (e.g. authenticatorGetInfo,
-  CTAP2.1 §8.4) to a connected device with a deadline
+  CTAP2.1 §6.4) to a connected device with a deadline
 - **THEN** the transport returns the parsed response or a typed error
   before the deadline; keepalive waits are bounded by the remaining
   budget and expiry returns `Error::Timeout` naming the command phase
@@ -64,7 +64,7 @@ signals, not errors, until the deadline expires.
 #### Scenario: Channel open negotiation
 
 - **WHEN** a caller opens a channel on an HID transport
-- **THEN** the transport performs CTAPHID INIT (CTAP2.1 §8.1.4) within
+- **THEN** the transport performs CTAPHID INIT (CTAP2.1 §11.2.9.1.3) within
   the remaining ceremony budget and returns a channel identifier, or
   returns `Error::Timeout` on expiry
 
@@ -72,7 +72,7 @@ signals, not errors, until the deadline expires.
 
 - **WHEN** a caller closes a device or drops the device future
 - **THEN** the device SHALL make a best-effort attempt to release the
-  channel (CTAP2.1 §8.1.4 channel lifetime rules); if the release attempt
+  channel (CTAP2.1 §11.2.3 channel lifetime rules); if the release attempt
   itself fails or the deadline has already expired, the error is
   swallowable, but the attempt is mandatory — an authenticator left holding
   an allocated channel blocks every other client until the key's channel
@@ -84,11 +84,11 @@ signals, not errors, until the deadline expires.
 The system SHALL define a `Ceremony` trait in `fidoh-core` as the
 single orchestration entry point. A ceremony consumes a connected
 `Device`, a `Sleep` factory, and a single deadline budget, and returns
-a typed output: for authenticatorGetAssertion (CTAP2.1 §8.2) the raw
+a typed output: for authenticatorGetAssertion (CTAP2.1 §6.2) the raw
 assertion (authenticatorData, signature, userHandle, credential id);
-for authenticatorGetInfo (CTAP2.1 §8.4) the parsed info structure. The
+for authenticatorGetInfo (CTAP2.1 §6.4) the parsed info structure. The
 library SHALL NOT construct `clientDataJSON` or apply origin semantics;
-the caller supplies a `clientDataHash` (WebAuthn L2 §6.5 is the RP's
+the caller supplies a `clientDataHash` (WebAuthn L2 §7.2 is the RP's
 responsibility).
 
 #### Scenario: GetAssertion ceremony completes within budget
@@ -102,7 +102,7 @@ responsibility).
 #### Scenario: Ceremony expires during user-presence wait
 
 - **WHEN** the authenticator signals UPNEEDED keepalives (CTAP2.1
-  §8.1.5.1) and the budget expires before user presence
+  §11.2.9.1.7) and the budget expires before user presence
 - **THEN** the ceremony returns `Error::Timeout` naming the
   user-presence phase, and the device remains usable for a subsequent
   ceremony
@@ -136,7 +136,7 @@ through `Sleep`. An unbounded wait is a spec violation.
 
 The workspace SHALL comprise `fidoh-core` (traits, CTAP model types,
 ceremony orchestration; no runtime, no OS dependencies beyond
-`alloc`/`core`), `fidoh-transport-hid` (CTAPHID per CTAP2.1 §8.1),
+`alloc`/`core`), `fidoh-transport-hid` (CTAPHID per CTAP2.1 §11.2),
 `fidoh-transport-pcsc` (ISO 7816-4 APDU layer shared by FIDO-over-CCID
 and NFC/ISO 14443 per CTAP2.1 §11), `fidoh-transport-soft` (in-process
 virtual authenticator, the CI harness), `fidoh-tokio` (`Sleep`
@@ -201,7 +201,7 @@ typed `Error::Timeout` naming the ceremony phase. Cancellation by
 dropping any ceremony or device future SHALL be safe: it SHALL NOT
 leave shared state poisoned, and the affected authenticator SHALL be
 usable by a subsequent ceremony (worst case after one channel
-re-handshake per CTAP2.1 §8.1.4).
+re-handshake per CTAP2.1 §11.2.9.1.3).
 
 #### Scenario: Remaining budget propagates across hops
 

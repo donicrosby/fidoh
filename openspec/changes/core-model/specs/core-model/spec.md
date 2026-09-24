@@ -385,7 +385,7 @@ keys) with the parameter labels and values of RFC 9053 §7 and §7.1.1:
 | Name | Label | CBOR type | Value for ES256 | Source |
 |---|---|---|---|---|
 | kty | 1 | int | 2 (EC2 — elliptic curve keys with x- and y-coordinate pair) | RFC 9053 §7, Table 17 |
-| alg | 3 | int | −7 (ES256 — ECDSA with SHA-256) | RFC 9053 §2/§3 (COSE algorithm registry value) |
+| alg | 3 | int | −7 (ES256 — ECDSA with SHA-256) | RFC 9053 §2.1 (COSE algorithm registry value) |
 | crv | −1 | int | 1 (P-256, a.k.a. secp256r1) | RFC 9053 §7.1, Table 18 |
 | x | −2 | bstr | x-coordinate; leading-zero octets MUST be preserved | RFC 9053 §7.1.1 |
 | y | −3 | bstr | y-coordinate; leading-zero octets MUST be preserved | RFC 9053 §7.1.1 |

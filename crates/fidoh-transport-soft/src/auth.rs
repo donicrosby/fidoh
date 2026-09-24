@@ -50,7 +50,7 @@ pub struct CredentialRecord {
 }
 
 impl CredentialRecord {
-    /// The COSE-encoded public key (RFC 8152 §8 / RFC 9053 §7.1).
+    /// The COSE-encoded public key (RFC 9053 §7.1.1; ES256 alg per §2.1).
     pub fn public_key(&self) -> CoseEs256Key {
         cose_key_of(self.private_key.verifying_key())
     }
@@ -326,13 +326,13 @@ impl SoftAuthenticator {
             up,
             uv,
             self.sign_count,
-            None, // AT is 0 in assertions (WebAuthn L2 §6.5)
+            None, // AT is 0 in assertions (WebAuthn L2 §6.1)
         )?;
         let mut signed = Vec::with_capacity(auth_data.len() + client_data_hash.len());
         signed.extend_from_slice(&auth_data);
         signed.extend_from_slice(client_data_hash);
         // Real ECDSA P-256 over authenticatorData || clientDataHash,
-        // ASN.1 DER encoded (CTAP2.1 §6.2.2 step 5; WebAuthn L2 §6.5).
+        // ASN.1 DER encoded (CTAP2.1 §6.2.2 step 5; WebAuthn L2 §6.5.5).
         let signature: Signature = record.private_key.sign(&signed);
         let der = signature.to_der();
         Ok((auth_data, der.as_bytes().to_vec()))
@@ -379,7 +379,7 @@ impl SoftAuthenticator {
     }
 }
 
-/// COSE encode a verifying key per RFC 8152 §8 / RFC 9053 §7.1:
+/// COSE encode a verifying key per RFC 9053 §7.1.1:
 /// `{1: 2, 3: -7, -1: 1, -2: x, -3: y}` with 32-byte coordinates.
 pub(crate) fn cose_key_of(key: &VerifyingKey) -> CoseEs256Key {
     let point = key.to_encoded_point(false);

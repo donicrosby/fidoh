@@ -134,7 +134,8 @@ cross-references were found.
 - The CTAPHID keepalive status byte is written `0x3B` in the
   transport-hid spec, docs/transport-hid.md, and the transport-hid
   design constant list (spec §11.2.9.1.7 value), but `0xBB` in
-  async-core spec:52 and async-core design:17 (§8.1.5.1-style notation),
+  async-core spec:52 and async-core design:17 (pre-repair §8.1.5.1-style
+  notation; those specs now cite §11.2.9.1.7),
   and `0x8B` in transport-soft design open question 2 (§11.3-style
   notation). All three refer to the same CTAPHID keepalive code point;
   the variation tracks different spec-section notations (0x80|CMD
@@ -211,6 +212,11 @@ spec'd default or interim behavior explicitly.
    and confirm the section number against the published CTAP2.0 text.
    (transport-pcsc design A5 and OQ-2; non-blocking since the feature is
    rejected for v1.)
+   **RESOLVED (2026-09-24 audit repair):** CTAP2.0 §10.3 does not exist
+   (§10 is IANA Considerations) and the INS 0x10 + 0x01-prefix mechanism
+   is not in the spec. The real mechanism is CTAP2.0 §8.2.6.1
+   NFCCTAP_MSG (INS 0x10), NFC-scoped. design A5/OQ-2 rewritten to cite
+   §8.2.6.1 with the invented prefix byte removed.
 2. **F-2 (severity: low, advisory) — transport-soft "Credential store"
    requirement has no standards citation.** Defensible as harness
    plumbing (config rule targets protocol claims), but a one-line

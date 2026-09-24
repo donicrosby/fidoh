@@ -254,12 +254,13 @@ rule. A typed skip preserves the distinction "this device answered,
 it just is not FIDO on this interface" from "the transport could not
 even talk to the reader."
 
-### A5: Follow CTAP2.0 §10.3's encapsulated CTAP2-in-U2F form (INS 0x10 with command byte 0x01 "version" prefix) on CCID — rejected for v1
+### A5: Follow CTAP2.0 §8.2.6.1's encapsulated NFC CTAP2 form (NFCCTAP_MSG, INS 0x10) on CCID — rejected for v1
 
-That path exists for CTAP1/U2F-fallback signaling toward
-CTAP1-only-visible interfaces; v1 requires CTAP2 capability and gates
-on the §6.4 probe (ceremony), and the plain §11.3.5 frame is the
-spec'd form for CTAP2-over-APDU. Adding the encapsulated form would
+That path (CTAP2.0 §8.2.6.1 NFCCTAP_MSG, INS 0x10) exists for CTAP2
+signaling on NFC interfaces where the FIDO applet is reached behind
+U2F visibility; it is specified for NFC, not CCID. v1 requires CTAP2
+capability and gates on the §6.4 probe (ceremony), and the plain
+§11.3.5 frame is the spec'd form for CTAP2-over-APDU. Adding the encapsulated form would
 double the framing surface for a fallback fidoh does not do. Open
 question OQ-2 records it for a future CTAP1-interop change.
 
@@ -275,9 +276,9 @@ question OQ-2 records it for a future CTAP1-interop change.
   while the card stays in field (device-specific), that is a live
   probe (cleanroom evidence class 3), not spec text. *Status: open;
   §5-grounded behavior is spec'd in the meantime.*
-- **OQ-2 — CTAP1/U2F interop frame (CTAP2.0 §10.3 encapsulation).**
-  Whether a later change adds the INS 0x10 + 0x01-prefix
-  encapsulated form to talk to devices whose FIDO applet answers
+- **OQ-2 — CTAP1/U2F interop frame (CTAP2.0 §8.2.6.1 NFCCTAP_MSG).**
+  Whether a later change adds the INS 0x10 encapsulated NFC form
+  to talk to devices whose FIDO applet answers
   U2F-only APDUs on some interfaces. v1 gates on the §6.4 probe and
   does not implement CTAP1 fallback (ceremony non-goal); the
   encapsulated frame would be the natural extension point. *Status:

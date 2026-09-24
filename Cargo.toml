@@ -19,3 +19,43 @@ repository = "https://github.com/donicrosby/fidoh"
 # - No tokio/async-std/smol in core crates (runtime-agnostic).
 # - deny(unsafe_code) per-crate unless explicitly justified in design.md.
 # - No unwrap/expect outside tests.
+
+# The root is a facade PACKAGE (async-core spec "Feature-flag layout with
+# soft transport as default"): plain `cargo build` compiles fidoh-core +
+# fidoh-transport-soft ONLY — no hidraw or PC/SC system libraries — and
+# `--features hid,pcsc,tokio` opts in the hardware transports and the
+# runtime adapter. No feature edge adds a dependency to `fidoh-core`
+# (design D5; enforced by fidoh-core's empty [dependencies]).
+[package]
+name = "fidoh"
+description = "Cleanroom CTAP2/WebAuthn client stack — facade crate wiring the workspace feature matrix (soft default; hid/pcsc/tokio opt-in)"
+version = "0.1.0-alpha.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[features]
+# default = ["soft"] is normative (async-core spec §5.1). The `pcsc`
+# feature forwards the real-reader binding (`fidoh-transport-pcsc/pcsc`,
+# the crate's single external dependency); `hid` needs none (sysfs +
+# hidraw are hand-rolled), and `tokio` enables the adapter crate.
+default = ["soft"]
+soft = ["dep:fidoh-transport-soft"]
+hid = ["dep:fidoh-transport-hid"]
+pcsc = ["dep:fidoh-transport-pcsc", "fidoh-transport-pcsc/pcsc"]
+tokio = ["dep:fidoh-tokio"]
+
+[dependencies]
+# Unconditional, NOT feature-gated: fidoh-core is the graph root every
+# configuration carries, and no feature flag adds to its own dependency
+# set (spec scenario: "fidoh-core's own dependency set is unchanged from
+# the default build").
+fidoh-core = { path = "crates/fidoh-core" }
+fidoh-transport-soft = { path = "crates/fidoh-transport-soft", optional = true }
+fidoh-transport-hid = { path = "crates/fidoh-transport-hid", optional = true }
+fidoh-transport-pcsc = { path = "crates/fidoh-transport-pcsc", optional = true }
+fidoh-tokio = { path = "crates/fidoh-tokio", optional = true }

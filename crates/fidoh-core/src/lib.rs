@@ -31,7 +31,7 @@
 //! fidoh-transport-  fidoh-transport- fidoh-transport- fidoh-tokio
 //!      hid              pcsc           soft           (Sleep impl,
 //!   (CTAPHID,       (ISO 7816-4    (in-process;      spawn_blocking
-//!   CTAP2.1 §8.1)    APDU layer,     CI harness)      wrapper)
+//!   CTAP2.1 §11.2)   APDU layer,     CI harness)      wrapper)
 //!                    CTAP2.1 §11)                         │
 //!                                                  fidoh-cli-ui (opt)
 //! ```

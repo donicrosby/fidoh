@@ -221,7 +221,7 @@ pub trait Transport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TransportKind {
-    /// CTAPHID over USB HID (CTAP2.1 §8.1) — `fidoh-transport-hid`.
+    /// CTAPHID over USB HID (CTAP2.1 §11.2) — `fidoh-transport-hid`.
     Hid,
     /// ISO 7816-4 APDU over CCID or NFC (CTAP2.1 §11) —
     /// `fidoh-transport-pcsc`.

@@ -101,7 +101,7 @@ to specify how it is produced.
 
 CTAP2 uses COSE_Key structures (e.g. getInfo `algorithms`, clientPIN
 `keyAgreement`, credential public keys inside authData). For ES256 the
-model pins: kty=EC2(2), alg=ES256(-7, RFC 9053 §3.1/Table — ECDSA w/
+model pins: kty=EC2(2), alg=ES256(-7, RFC 9053 §2.1/Table 1 — ECDSA w/
 SHA-256), crv=P-256(1), x and y as bstr with leading zeros preserved
 (RFC 9053 §7.1.1). Both x and y are REQUIRED for public keys per
 RFC 9053 §7.1.1.

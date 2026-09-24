@@ -15,7 +15,7 @@
 //! future is safe — no poisoned state; a device dropped mid-operation
 //! makes a best-effort release attempt, and a subsequent `connect` to
 //! the same authenticator succeeds (worst case after one INIT
-//! re-handshake, CTAP2.1 §8.1.4).
+//! re-handshake, CTAP2.1 §11.2.5.3).
 
 use core::future::Future;
 
@@ -56,7 +56,7 @@ pub trait Device {
     ) -> impl Future<Output = Result<DeviceEvent, Error>> + Send;
 
     /// Open a channel on the transport (CTAPHID INIT negotiation per
-    /// CTAP2.1 §8.1.4 for HID; APDU SELECT of the FIDO application per
+    /// CTAP2.1 §11.2.9.1.3 for HID; APDU SELECT of the FIDO application per
     /// CTAP2.1 §11 for PC/SC), bounded by the remaining budget.
     ///
     /// Returns the negotiated channel identifier, or
@@ -69,7 +69,7 @@ pub trait Device {
     ) -> impl Future<Output = Result<ChannelId, Error>> + Send;
 
     /// Close the device, making a best-effort attempt to release the
-    /// channel (CTAP2.1 §8.1.4 channel lifetime rules).
+    /// channel (CTAP2.1 §11.2.3 channel lifetime rules).
     ///
     /// The release attempt is mandatory (design OQ-3, resolved): if
     /// the release itself fails or the budget has already expired, the
@@ -86,17 +86,17 @@ pub trait Device {
 /// A CTAP command in transit to a device.
 ///
 /// v1 carries the two commands in scope (async-core spec: "for
-/// authenticatorGetAssertion (CTAP2.1 §8.2) the raw assertion...; for
-/// authenticatorGetInfo (CTAP2.1 §8.4) the parsed info structure") by
+/// authenticatorGetAssertion (CTAP2.1 §6.2) the raw assertion...; for
+/// authenticatorGetInfo (CTAP2.1 §6.4) the parsed info structure") by
 /// reference to the core-model request structures; the wire encoding
 /// is delegated to those models (`get_assertion::GetAssertionRequest`,
 /// `get_info` has no request payload beyond the leading command byte).
 #[derive(Clone, Debug)]
 pub enum CtapCommand {
-    /// authenticatorGetInfo (CTAP2.1 §8.4 / §6.4). No request
+    /// authenticatorGetInfo (CTAP2.1 §6.4). No request
     /// payload.
     GetInfo,
-    /// authenticatorGetAssertion (CTAP2.1 §8.2 / §6.2) with the
+    /// authenticatorGetAssertion (CTAP2.1 §6.2) with the
     /// caller-validated request model.
     GetAssertion(crate::get_assertion::GetAssertionRequest),
 }
@@ -131,7 +131,7 @@ pub enum DeviceEvent {
     },
     /// The terminal response payload: the CTAP2 status byte plus the
     /// response body for successful commands (CBOR payload; empty for
-    /// authenticatorGetInfo per §8.4 response layout).
+    /// authenticatorGetInfo per §6.4 response layout).
     Response {
         /// CTAP2 status byte (CTAP2.1 §8.2); 0x00 on success.
         status: u8,
@@ -143,6 +143,6 @@ pub enum DeviceEvent {
 
 /// The channel identifier negotiated at
 /// [`Device::open_channel`](Device::open_channel) (CTAPHID CID per
-/// CTAP2.1 §8.1.4; PC/SC has a logical per-connection channel).
+/// CTAP2.1 §11.2.9.1.3; PC/SC has a logical per-connection channel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ChannelId(pub u32);

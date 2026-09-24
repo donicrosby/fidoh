@@ -37,11 +37,12 @@ pub const INS_GET_RESPONSE: u8 = 0xC0;
 /// (§11.3.7.1); OR'd into P1 0x00 of every NFCCTAP_MSG.
 pub const P1_GETRESPONSE_SUPPORTED: u8 = 0x80;
 
-/// CTAP command bytes in v1 scope (CTAP2.1 §8.2 command-byte table).
+/// CTAP command bytes in v1 scope (CTAP2.1 §6: GET_INFO §6.4 = 0x04,
+/// GET_ASSERTION §6.2 = 0x02).
 pub mod command_byte {
-    /// authenticatorGetInfo (CTAP2.1 §8.2.4 / §6.4).
+    /// authenticatorGetInfo (CTAP2.1 §6.4).
     pub const GET_INFO: u8 = 0x04;
-    /// authenticatorGetAssertion (CTAP2.1 §8.2.3 / §6.2).
+    /// authenticatorGetAssertion (CTAP2.1 §6.2).
     pub const GET_ASSERTION: u8 = 0x02;
 }
 

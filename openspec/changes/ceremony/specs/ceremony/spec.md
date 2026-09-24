@@ -8,7 +8,7 @@ traits and single-budget timeout model (async-core D4), and on
 core-model's wire structures and CTAP2.1 §8.2 status table. The library
 is RP-agnostic: the caller supplies `clientDataHash` and consumes the
 raw assertion; clientDataJSON construction and origin semantics are the
-caller's responsibility (WebAuthn L2 §6.5).
+caller's responsibility (WebAuthn L2 §7.2).
 
 ## ADDED Requirements
 
@@ -82,7 +82,7 @@ budget.
 
 The ceremony SHALL accept: `rpId` (string); `clientDataHash`
 (caller-supplied; the library SHALL NOT construct `clientDataJSON` or
-apply origin semantics — WebAuthn L2 §6.5 is the RP's responsibility);
+apply origin semantics — WebAuthn L2 §7.2 is the RP's responsibility);
 optional `allowCredentials`; a user-verification policy; and a single
 deadline budget. When `allowCredentials` is absent OR empty, the
 allowList key (0x03) SHALL be omitted from the encoded request
@@ -117,7 +117,7 @@ the capabilities response SHALL drive request construction (options,
 uv capability, pinUvAuthToken availability) and SHALL be included in
 the ceremony outcome; (2) send authenticatorGetAssertion (CTAP2.1 §6.2); (3) consume
 keepalive / user-presence progress signals surfaced by the transport
-(CTAPHID KEEPALIVE UPNEEDED per CTAP2.1 §8.1.5.1; surfaced as progress,
+(CTAPHID KEEPALIVE UPNEEDED per CTAP2.1 §11.2.9.1.7; surfaced as progress,
 not errors, per async-core) until a terminal response arrives. The
 entire sequence — probe, exchange, and every keepalive wait — SHALL be
 bounded by the SINGLE caller-supplied budget: each hop consumes only
@@ -236,14 +236,14 @@ string, an untyped error, or a panic (stack invariant).
 
 The ceremony SHALL return the raw assertion fields exactly as decoded
 by core-model: credential (PublicKeyCredentialDescriptor),
-authenticatorData, signature, userHandle (optional per CTAP2.1 §6.2),
+authenticatorData, signature, userHandle (optional; CTAP2.1 §6.2 `user` member 0x04, WebAuthn L2 §5.2.2),
 and numberOfCredentials. When the caller supplied `allowCredentials`,
 the ceremony SHALL verify that the returned credential id is a member
 of the allow list; a mismatch SHALL fail the ceremony with the typed
 `Error::CredentialMismatch` variant (a library-safety rule; see design
 OQ-3 for grounding status) rather than silently returning the foreign
 assertion. The ceremony SHALL NOT verify the signature itself —
-signature verification is the RP's responsibility (WebAuthn L2 §6.5).
+signature verification is the RP's responsibility (WebAuthn L2 §7.2).
 
 #### Scenario: Wrong credential id rejected (CI: transport-soft wrong-credential-id knob)
 

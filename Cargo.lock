@@ -138,6 +138,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fidoh"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "fidoh-core",
+ "fidoh-tokio",
+ "fidoh-transport-hid",
+ "fidoh-transport-pcsc",
+ "fidoh-transport-soft",
+]
+
+[[package]]
 name = "fidoh-cli-ui"
 version = "0.1.0-alpha.1"
 dependencies = [

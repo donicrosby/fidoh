@@ -12,10 +12,10 @@ Linux hidraw exposes FIDO authenticators as character devices whose
 `read`/`write` are blocking syscalls; there is no standard async
 notification mechanism wired into the default executor ecosystem for
 hidraw that works without either a blocking thread or an external
-polling reactor. CTAPHID (CTAP2.1 §8.1) additionally requires
+polling reactor. CTAPHID (CTAP2.1 §11.2) additionally requires
 keepalive-driven polling loops (authenticator emits
 `CTAPHID_KEEPALIVE` status 0x02 (UPNEEDED) in CTAPHID keepalive frames (cmd 0x3B) while waiting for user
-presence, CTAP2.1 §8.1.5.1), so transport code inherently contains
+presence, CTAP2.1 §11.2.9.1.7), so transport code inherently contains
 "wait until response or deadline" logic. The project stack invariants
 require: no executor dependency in core crates, every wait bounded by a
 caller-visible timeout, and typed errors.
@@ -64,8 +64,8 @@ pub trait Sleep {
   harness zero-cost).
 - `Ceremony` consumes the device handle for the duration of the run and
   returns the assertion payload (authenticatorData, signature,
-  userHandle, credential id) for getAssertion per CTAP2.1 §8.2, or the
-  parsed authenticatorGetInfo response per CTAP2.1 §8.4.
+  userHandle, credential id) for getAssertion per CTAP2.1 §6.2, or the
+  parsed authenticatorGetInfo response per CTAP2.1 §6.4.
 
 ### D2: Crate graph and dependency rules
 
@@ -78,7 +78,7 @@ pub trait Sleep {
  fidoh-transport-  fidoh-transport- fidoh-transport- fidoh-tokio
       hid              pcsc           soft           (Sleep impl,
    (CTAPHID,       (ISO 7816-4    (in-process;      spawn_blocking
-   CTAP2.1 §8.1)    APDU layer,     CI harness)      wrapper)
+   CTAP2.1 §11.2)    APDU layer,     CI harness)      wrapper)
                     CTAP2.1 §11)                         │
                                                   fidoh-cli-ui (opt)
 ```
@@ -124,7 +124,7 @@ Named blocking waits and their timeout bounds (design rule):
   ceremony budget, max 30 s default per-wait slice (keepalive-driven
   re-slicing keeps the loop responsive to drop).
 - CTAPHID INIT channel negotiation: bounded by the remaining ceremony
-  budget (CTAP2.1 §8.1.4 INIT is a broadcast handshake).
+  budget (CTAP2.1 §11.2.9.1.3 INIT is a broadcast handshake).
 - APDU select/transceive polling (FIDO-over-CCID / NFC): bounded by the
   remaining ceremony budget; NFC field polling slices at max 1 s per
   poll so card removal surfaces promptly.
@@ -147,7 +147,7 @@ Named blocking waits and their timeout bounds (design rule):
   device future mid-wait leaves no poisoned shared state; the next
   `connect` on the same authenticator MUST succeed (worst case after
   one INIT re-handshake, since CTAPHID channels are per-transaction,
-  CTAP2.1 §8.1.4).
+  CTAP2.1 §11.2.3).
 
 ### D5: Feature-flag layout
 

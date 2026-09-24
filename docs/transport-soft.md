@@ -15,7 +15,7 @@ the API shape, not captured from a running system).
 |---|---|---|
 | authenticatorGetInfo | ✅ | Pinned AAGUID = `66 69 64 6F 68 2D 73 6F 66 74 2D 74 6F 6B 65 6E` (`b"fidoh-soft-token"`, 16 ASCII bytes — authoritative value for this crate); versions `FIDO_2_0`, `FIDO_2_1`; options `rk`/`up`/`uv` (CTAP2.1 §6.4) |
 | authenticatorMakeCredential | ✅ internal only | Harness method on the concrete type; **not** in the client-facing API (CTAP2.1 §6.1) |
-| authenticatorGetAssertion | ✅ | Real ECDSA P-256 signatures over `authenticatorData \|\| clientDataHash` (CTAP2.1 §6.2.2, WebAuthn L2 §6.5) |
+| authenticatorGetAssertion | ✅ | Real ECDSA P-256 signatures over `authenticatorData \|\| clientDataHash` (CTAP2.1 §6.2.2, WebAuthn L2 §6.5.5) |
 
 Attestation is always `none` (WebAuthn L2 §8.7). Out of scope: clientPIN/UV
 protocols, credential management, large blobs, hmac-secret.
@@ -85,7 +85,7 @@ pending.await??;
 
 ## authenticatorData quick reference
 
-Layout per WebAuthn L2 §6.5 (constructed example for an assertion):
+Layout per WebAuthn L2 §6.1 (constructed example for an assertion):
 
 ```
 offset  size  field
@@ -96,7 +96,7 @@ offset  size  field
 
 makeCredential responses additionally set AT and append attested credential
 data: 16-byte pinned AAGUID, 2-byte BE credential-ID length, credential ID,
-COSE ES256 public key (`{1:2, 3:-7, -1:1, -2:x, -3:y}`, RFC 8152 §8 /
+COSE ES256 public key (`{1:2, 3:-7, -1:1, -2:x, -3:y}`, RFC 9052 §7 /
 RFC 9053 §7.1).
 
 ## Conformance vectors

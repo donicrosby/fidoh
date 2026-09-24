@@ -57,10 +57,10 @@ CI produce credential fixtures with real keys.
   caller-supplied or default CSPRNG. Randomness source is injectable so
   conformance vectors are reproducible (deterministic RNG in fixtures only).
 - Signatures: ECDSA over `authenticatorData || clientDataHash`, DER-encoded,
-  per CTAP2.1 §6.2.2 step 5 and WebAuthn L2 §6.5.
-- rpIdHash: SHA-256 of the RP ID, per WebAuthn L2 §6.5.
+  per CTAP2.1 §6.2.2 step 5 and WebAuthn L2 §6.5.5.
+- rpIdHash: SHA-256 of the RP ID, per WebAuthn L2 §6.1.
 - COSE key encoding: `kty=2 (EC2)`, `alg=-7 (ES256)`, `crv=1 (P-256)`,
-  `x`, `y` 32-byte coordinates — RFC 8152 §8.1, RFC 9053 §7.1. No `kid`,
+  `x`, `y` 32-byte coordinates — RFC 9052 §7, RFC 9053 §7.1. No `kid`,
   no key ops in the credential-source encoding.
 
 ## Alternatives considered

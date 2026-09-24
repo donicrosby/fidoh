@@ -277,11 +277,11 @@ pub enum Error {
     DeviceGone,
     /// The channel identifier the device supplied on a previous
     /// operation is no longer valid (e.g. after cancellation and
-    /// re-handshake, CTAP2.1 §8.1.4 channel lifetime).
+    /// re-handshake, CTAP2.1 §11.2.3 channel lifetime).
     ChannelClosed,
     /// The transport rejected an operation on this device that another
-    /// operation still holds (busy/locked, CTAP2.1 §8.1.3 channel
-    /// locking semantics).
+    /// operation still holds (busy/locked, CTAP2.1 §11.2.5 arbitration,
+    /// §11.2.6 channel locking semantics).
     Busy,
 }
 

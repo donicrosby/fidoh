@@ -14,15 +14,15 @@ stable contract instead of re-litigating architecture per crate.
 - Define the core trait surface in `fidoh-core`:
   - `Transport` — enumerate candidate devices, connect to a chosen one.
   - `Device` — send a CTAP command, receive a response, manage channel
-    lifecycle (open/close, init/negotiate per CTAP2.1 §8.1.4 INIT).
+    lifecycle (open/close, init/negotiate per CTAP2.1 §11.2.9.1.3 INIT).
   - `Ceremony` — orchestration entry point for the v1 ceremonies
-    (authenticatorGetAssertion, authenticatorGetInfo per CTAP2.1 §8).
+    (authenticatorGetAssertion, authenticatorGetInfo per CTAP2.1 §6.2/§6.4).
   - `Sleep` — caller-provided timer future factory; the ONLY legal way
     to wait (stack invariant: every device wait has a caller-visible
     timeout).
 - Define the crate graph: `fidoh-core` (traits + model + ceremony
   orchestration, no runtime, no OS deps beyond `alloc`/`core`),
-  `fidoh-transport-hid` (CTAPHID framing per CTAP2.1 §8.1),
+  `fidoh-transport-hid` (CTAPHID framing per CTAP2.1 §11.2),
   `fidoh-transport-pcsc` (FIDO-over-CCID and NFC/ISO 14443 sharing one
   ISO 7816-4 APDU layer per CTAP2.1 §11), `fidoh-transport-soft`
   (in-process virtual authenticator, the CI harness),
@@ -60,5 +60,5 @@ stable contract instead of re-litigating architecture per crate.
 - Fully-async transport I/O (e.g. `async-io`-based hidraw) in v1.
 - Runtime adapters other than tokio (async-std, smol, embassy) in v1.
 - RP-side semantics: `clientDataJSON` construction, origin handling
-  (RP boundary rule: caller's responsibility, WebAuthn L2 §6.5 is the
+  (RP boundary rule: caller's responsibility, WebAuthn L2 §7.2 is the
   RP's spec, not ours).
