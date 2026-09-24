@@ -172,6 +172,24 @@ additionally gate on `cargo clippy` with zero warnings (warnings denied)
 and `cargo fmt --check`. A failure of any of the four gates (MSRV
 build+test, stable build+test, clippy, fmt) SHALL fail the commit.
 
+CI SHALL run cargo with `--locked` so the committed `Cargo.lock` is
+authoritative. The committed lockfile SHALL remain resolvable by the
+MSRV cargo: while the workspace MSRV is below the cargo version that
+stabilized an edition (e.g. edition2024 needs cargo ≥ 1.85), no
+transitive dependency may be pinned at a release requiring that
+edition; maintaining such pins (precise-version downgrades in
+`Cargo.lock`) is part of the MSRV gate, and a dependency bump that
+breaks 1.75 resolvability SHALL fail the commit.
+
+#### Scenario: MSRV-incompatible transitive pin fails the gate
+
+- **WHEN** a dependency update introduces a lockfile entry the MSRV
+  cargo cannot parse (e.g. a crate built with edition2024) and the
+  1.75 job resolves with `--locked`
+- **THEN** the MSRV job fails at resolve/parse time, blocking the
+  commit, and the remedy is pinning the newest MSRV-compatible
+  release in the lockfile
+
 #### Scenario: MSRV gate catches a too-new language feature
 
 - **WHEN** a commit uses a Rust feature stabilized after 1.75 (e.g. a newer

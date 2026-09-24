@@ -14,3 +14,4 @@ Implementation tasks arrive in a later change set.
 - [x] 9. Specify CBOR decoder fuzzing as an implementation-phase requirement with rationale (attacker-controlled bytes from a USB device).
 - [x] 10. Author docs/testing.md: manual hardware runbook — per-row setup steps, expected typed outcome, LED/touch cues; examples labeled constructed.
 - [x] 11. Run `openspec validate testing-strategy --strict` until green.
+- [x] 12. Tighten the MSRV gate with the lockfile-resolution rule: `--locked` in CI, committed lockfile resolvable under the MSRV cargo (precise pins for edition2024 transitive deps) — added after a real base64ct/zeroize edition2024 drift broke the 1.75 job.

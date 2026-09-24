@@ -35,10 +35,7 @@ pub(crate) const CMD_PING: u8 = 0x01;
 
 /// CTAPHID_LOCK (§11.2.9.2.2). Never sent (spec requirement: no lock
 /// command on the wire, v1; §11.2.6).
-#[allow(
-    dead_code,
-    reason = "modeled for completeness; never sent in v1 (spec SHALL NOT send)"
-)]
+#[allow(dead_code)]
 pub(crate) const CMD_LOCK: u8 = 0x04;
 
 /// CTAPHID_INIT (§11.2.9.1.3): channel allocation / resync.
@@ -88,10 +85,7 @@ pub(crate) const CAPABILITY_NMSG: u8 = 0x08;
 pub(crate) const CAPABILITY_KNOWN_MASK: u8 = CAPABILITY_WINK | CAPABILITY_CBOR | CAPABILITY_NMSG;
 
 /// STATUS_PROCESSING — still processing (§11.2.9.1.7).
-#[allow(
-    dead_code,
-    reason = "referenced by probes; the FSM surfaces statuses as raw bytes"
-)]
+#[allow(dead_code)]
 pub(crate) const STATUS_PROCESSING: u8 = 0x01;
 
 /// STATUS_UPNEEDED — waiting for user presence (§11.2.9.1.7).

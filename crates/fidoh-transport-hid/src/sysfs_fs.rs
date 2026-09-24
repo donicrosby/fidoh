@@ -59,10 +59,7 @@ impl SysfsRead for FsSysfs {
 /// Enumerate FIDO hidraw candidates on the real system: walk
 /// `/sys/class/hidraw` (design D7), returning matching entries and
 /// per-node diagnostics.
-#[allow(
-    dead_code,
-    reason = "enumerate goes through HidTransport::enumerate; kept as the system-call convenience"
-)]
+#[allow(dead_code)]
 pub(crate) fn enumerate_system() -> (Vec<crate::sysfs::HidRawEntry>, Vec<HidError>) {
     crate::sysfs::walk(&FsSysfs::system(), "/sys/class/hidraw")
 }

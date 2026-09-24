@@ -2,14 +2,21 @@
 #
 # Matrix contract (docs/testing.md §CI contract):
 # - fmt + clippy + openspec validate on every commit
-# - default-feature tests (soft token) are the mandatory green tier
+# - default-feature tests (soft token) are the mandatory green tier:
+#   scoped to the default-graph crates (-p fidoh -p fidoh-core
+#   -p fidoh-transport-soft). The job installs NO PC/SC system library,
+#   so if the default build graph ever grows an OS dependency, the
+#   build fails — the async-core "Default build is OS-dependency-free"
+#   scenario, enforced by the machine. (Full-workspace `cargo test`
+#   builds every member's build script, and pcsc-sys links against
+#   libpcsclite even when the binding feature is off — that is why the
+#   default tier is package-scoped rather than --workspace.)
 # - all-feature tests cover hid/pcsc/tokio compilation and the
 #   pure-framing pcsc layer
-# - the default-feature test job installs NO PC/SC system library: if
-#   the default build ever grows an OS dependency, the build fails —
-#   the async-core "Default build is OS-dependency-free" scenario,
-#   enforced by the machine
-# - MSRV job pins 1.75 (workspace rust-version)
+# - MSRV job pins 1.75 (workspace rust-version): default build + tests
+#   + all-features build, all --locked. The lockfile is pinned to
+#   pre-edition2024 transitive versions (base64ct 1.7.3, zeroize 1.8.2)
+#   so cargo 1.75 can resolve it; bump pins only with an MSRV re-check.
 name: ci
 
 on:
@@ -44,7 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: PC/SC headers (all-features build)
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
-      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+      - run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -53,10 +60,10 @@ jobs:
       matrix:
         include:
           - name: default-soft
-            features: ""
+            cmd: cargo test --locked -p fidoh -p fidoh-core -p fidoh-transport-soft
             pcsclib: false
           - name: all-features
-            features: --all-features
+            cmd: cargo test --locked --workspace --all-features
             pcsclib: true
     name: test (${{ matrix.name }})
     steps:
@@ -66,7 +73,7 @@ jobs:
       - name: PC/SC headers
         if: ${{ matrix.pcsclib }}
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
-      - run: cargo test ${{ matrix.features }} --workspace
+      - run: ${{ matrix.cmd }}
 
   msrv:
     runs-on: ubuntu-latest
@@ -78,6 +85,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
       - name: default build (soft only)
         run: cargo build --locked
+      - name: default-tier tests
+        run: cargo test --locked -p fidoh -p fidoh-core -p fidoh-transport-soft
       - name: all-features build
         run: cargo build --locked --workspace --all-features
 
