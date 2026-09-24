@@ -1,0 +1,37 @@
+[package]
+name = "fidoh-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.fidoh-core]
+path = "../crates/fidoh-core"
+
+[[bin]]
+name = "cbor_decode_roundtrip"
+path = "fuzz_targets/cbor_decode_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cbor_decode_map"
+path = "fuzz_targets/cbor_decode_map.rs"
+test = false
+doc = false
+bench = false
+
+# Exclude the fuzz crate from the root workspace — it is nightly-only,
+# so it must not be parsed by stable/MSRV cargo.
+[workspace]
+
+# Keep generated inputs and build dirs out of the committed tree; only
+# the curated seed corpus (valid_*/adv_*/bnd_*) is checked in. The fuzz
+# crate keeps its own Cargo.lock (nightly-only; never merged into the
+# root lockfile).

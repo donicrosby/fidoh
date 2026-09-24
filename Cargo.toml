@@ -8,6 +8,10 @@ members = [
     "crates/fidoh-tokio",
     "crates/fidoh-cli-ui",
 ]
+# The fuzz/ crate is nightly-only (libFuzzer + -Zsanitizer) and is its
+# own workspace so the root Cargo.lock and the 1.75 MSRV build never
+# parse it (testing-strategy spec, "CBOR decoder fuzz target").
+exclude = ["fuzz"]
 
 [workspace.package]
 edition = "2021"

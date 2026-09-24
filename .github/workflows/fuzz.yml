@@ -1,0 +1,62 @@
+# CBOR decoder fuzz smoke run — testing-strategy spec, "Requirement:
+# CBOR decoder fuzz target".
+#
+# Short time-boxed (~60 s) coverage-guided run over the committed seed
+# corpus plus generated inputs on every push to main and every PR. Any
+# panic, abort, or non-terminating parse fails the job (spec scenario
+# "Fuzz smoke run gates CI"). Longer campaigns run outside CI.
+#
+# This workflow is deliberately separate from ci.yml and uses its own
+# cache prefix ("fuzz"): the fuzz crate is nightly-only and must never
+# share a build cache with the stable/MSRV CI jobs.
+name: fuzz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Least privilege: reads code, never touches the API.
+permissions:
+  contents: read
+
+jobs:
+  cbor-decoder:
+    name: cbor_decode smoke (60s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The fuzz crate is exempt from the workspace 1.75 MSRV
+      # (nightly-only, dev-only); the root workspace keeps building on
+      # stable/1.75 because Cargo.toml excludes fuzz/.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      # Prebuilt cargo-fuzz binary — no compile in CI.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      # Own prefix so this never collides with ci.yml's cache entries.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: fuzz
+          workspaces: fuzz
+
+      - name: Fuzz cbor_decode_roundtrip (60s smoke)
+        working-directory: fuzz
+        run: cargo fuzz run cbor_decode_roundtrip -- -max_total_time=60 -rss_limit_mb=4096
+
+      - name: Fuzz cbor_decode_map (60s smoke)
+        working-directory: fuzz
+        run: cargo fuzz run cbor_decode_map -- -max_total_time=60 -rss_limit_mb=4096
