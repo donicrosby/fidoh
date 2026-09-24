@@ -188,7 +188,7 @@ fn encode_value(value: &CborValue, depth: u32, out: &mut Vec<u8>) -> Result<(), 
                 keys.push((encode_value_vec(k, depth + 1)?, v));
             }
             // Encoders MUST NOT emit duplicate map keys (CTAP2.1 §8).
-            keys.sort_by(|a, b| a.0.cmp(&b.0));
+            keys.sort_by(|a, b| canonical_key_cmp(&a.0, &b.0));
             for pair in keys.windows(2) {
                 if pair[0].0 == pair[1].0 {
                     return Err(EncodeError::DuplicateKey);
@@ -612,6 +612,55 @@ mod tests {
                 ),
             ])
         );
+    }
+
+    #[test]
+    fn encoder_emits_canonical_key_order_length_first() {
+        // Regression: the encoder sorted encoded keys by plain byte-wise
+        // lex, but the decoder enforces CTAP2.1 §8 length-first order, so
+        // encode({Text("aa"): [Int(1)], Null: Int(1)}) emitted
+        // `61 61 ..` before `f6` and the crate's own STRICT decoder
+        // rejected the output with UnsortedKeys.
+        let value = CborValue::Map(vec![
+            (
+                CborValue::Text(alloc::string::String::from("aa")),
+                CborValue::Array(alloc::vec![CborValue::Int(1)]),
+            ),
+            (CborValue::Null, CborValue::Int(1)),
+        ]);
+        // Canonical order: `f6` (1-byte key) first, then `62 61 61`
+        // (3-byte key): a2 | f6 01 | 62 61 61 81 01.
+        let encoded = value.encode().unwrap();
+        assert_eq!(encoded.as_slice(), &hex("a2f6016261618101"));
+
+        // The encoder's output must satisfy the decoder's own ordering
+        // rule under Strict.
+        let redec = CborValue::decode(&encoded, DecodePolicy::Strict).unwrap();
+        assert_eq!(redec.encode().unwrap(), encoded);
+    }
+
+    #[test]
+    fn encoder_key_order_interleaves_lengths_then_lex() {
+        // Keys `17` (Int 23), `60` (Text ""), `f6` (Null), `61 61`
+        // (Text "aa"): three 1-byte keys ordered byte-wise (`17 < 60
+        // < f6`), then the 2-byte key — not the plain-lex order
+        // (`17 < 60 < 6161 < f6`) the old sort produced.
+        let value = CborValue::Map(vec![
+            (CborValue::Int(23), CborValue::Int(0)),
+            (
+                CborValue::Text(alloc::string::String::from("aa")),
+                CborValue::Int(0),
+            ),
+            (CborValue::Null, CborValue::Int(0)),
+            (
+                CborValue::Text(alloc::string::String::from("")),
+                CborValue::Int(0),
+            ),
+        ]);
+        let encoded = value.encode().unwrap();
+        assert_eq!(encoded.as_slice(), &hex("a417006000f60062616100"));
+        let redec = CborValue::decode(&encoded, DecodePolicy::Strict).unwrap();
+        assert_eq!(redec.encode().unwrap(), encoded);
     }
 
     // ------------------------------------------------------------------

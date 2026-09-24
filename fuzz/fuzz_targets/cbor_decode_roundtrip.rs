@@ -9,8 +9,9 @@
 //!    CBOR layer fails the run (libFuzzer catches panics by unwinding,
 //!    aborts via its crash handler).
 //! 2. **Total function over `&[u8]`** — every input either
-//!    - decodes to a `CborValue` whose **canonical re-encode round-trips
-//!      byte-for-byte** (decode → encode == input), or
+//!    - decodes to a `CborValue` whose **canonical re-encode is
+//!      byte-identical to the input** (strict decode admits only
+//!      canonical forms) and **re-decodable under Strict**, or
 //!    - is rejected with a **typed `DecodeError`** (the strictness
 //!      policy: non-minimal encodings, indefinite lengths, tags,
 //!      unsorted/duplicate keys, depth > 4, trailing bytes, ...).
@@ -45,28 +46,18 @@ fuzz_target!(|data: &[u8]| {
             // canonical form re-decodes, and it is a byte-exact encode
             // fixed point.
             //
-            // NOTE (fidoh-core divergences this target documented; fix
-            // owners: core-model):
-            //  1. The encoder sorts map keys by plain byte-wise lex
-            //     (`keys.sort_by(|a, b| a.0.cmp(&b.0))`, cbor.rs Map
-            //     arm) while the decoder enforces the CTAP2.1 §8
-            //     length-first order (canonical_key_cmp), so encoder
-            //     output for key sets where the orders differ (e.g.
-            //     keys `f6` and `6161`) is rejected by the crate's own
-            //     STRICT decoder (UnsortedKeys). Strict byte-identity
-            //     (encode(decode(d, Strict)) == d) and strict
-            //     re-decodability of `re` are therefore NOT asserted
-            //     yet; re-decode uses Tolerant, which admits any key
-            //     order. Re-enable both when the sort is canonical.
-            //  2. Tolerant decode accepts non-minimal key encodings
-            //     whose minimal re-encodings collide (e.g. keys `01`
-            //     and `19 00 01`), so encode() fails DuplicateKey on a
-            //     Tolerant-decoded value — an input that "decodes"
-            //     but cannot "re-encode canonically". Tolerant is a
-            //     deviant-device probe posture, not the normative
-            //     strictness policy, so that class is tolerated here
-            //     (the input is treated as rejected-by-encoder) and
-            //     the full contract is asserted under Strict.
+            // NOTE (known Tolerant-posture divergence): Tolerant decode
+            // accepts non-minimal key encodings whose minimal
+            // re-encodings collide (e.g. keys `01` and `19 00 01`), so
+            // encode() fails DuplicateKey on a Tolerant-decoded value —
+            // an input that "decodes" but cannot "re-encode
+            // canonically". Tolerant is a deviant-device probe posture,
+            // not the normative strictness policy, so that class is
+            // tolerated here (the input is treated as
+            // rejected-by-encoder) and the full contract is asserted
+            // under Strict. (The encoder's length-first key sort bug
+            // that previously gated Strict re-decodability and strict
+            // byte-identity is fixed; both are asserted again.)
             Ok(value) => {
                 let re = match value.encode() {
                     Ok(re) => re,
@@ -74,11 +65,20 @@ fuzz_target!(|data: &[u8]| {
                         if policy.is_strict() {
                             panic!("decode accepted what encode rejects (Strict): {e:?}");
                         }
-                        continue; // documented Tolerant divergence (2)
+                        continue; // documented Tolerant divergence
                     }
                 };
-                let redec = CborValue::decode(&re, DecodePolicy::Tolerant).unwrap_or_else(|e| {
-                    panic!("canonical re-encode not re-decodable (Tolerant): {e:?}")
+                // Strict inputs are already canonical: the re-encode
+                // must be byte-identical to the input.
+                if policy.is_strict() {
+                    assert_eq!(
+                        re.as_slice(),
+                        data,
+                        "strict input not an encode/decode byte fixed point"
+                    );
+                }
+                let redec = CborValue::decode(&re, policy).unwrap_or_else(|e| {
+                    panic!("canonical re-encode not re-decodable under {policy:?}: {e:?}")
                 });
                 assert_eq!(
                     redec.encode().as_deref(),
