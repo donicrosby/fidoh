@@ -31,6 +31,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Least privilege: this workflow only reads code and never touches the
+# API, so the implicit GITHUB_TOKEN gets exactly contents:read regardless
+# of the repo-level default.
+permissions:
+  contents: read
+
 jobs:
   fmt:
     runs-on: ubuntu-latest
