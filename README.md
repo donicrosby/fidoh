@@ -11,4 +11,14 @@ spec set of Phase A–D is realized as crates — core model + ceremony,
 soft/HID/PC-SC transports, the runtime adapter, and the `fidoh` CLI
 (`list` / `info` / `assert`; `assert --demo` runs hardwareless).
 
+Build shapes (async-core spec: soft transport is the default):
+
+```sh
+cargo build                            # core + soft transport only — no OS device APIs
+cargo build --features hid             # + Linux hidraw transport
+cargo build --features pcsc            # + PC/SC transport (needs libpcsclite + pcscd)
+cargo build --features hid,pcsc,tokio  # whole graph incl. the runtime adapter
+cargo test                             # the CI contract: full ceremony on the soft token
+```
+
 See `docs/` and `openspec/` for the living specification.

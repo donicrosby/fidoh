@@ -373,6 +373,9 @@ impl fmt::Display for DiscoveryDiagnostic {
 ///
 /// | Status | Variant |
 /// |---|---|
+/// Operator view: `docs/errors.md` (variant → meaning → remediation),
+/// cross-linked per the error-diagnostics change.
+///
 /// | 0x2E `NO_CREDENTIALS`, 0x22 `INVALID_CREDENTIAL` | [`CeremonyError::NoCredentials`] |
 /// | 0x2F `USER_ACTION_TIMEOUT` | [`CeremonyError::UserActionTimeout`] |
 /// | 0x2D `KEEPALIVE_CANCEL` | [`CeremonyError::UserCancelled`] |

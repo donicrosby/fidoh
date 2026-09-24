@@ -12,7 +12,7 @@ by firmware.
 
 | Tier | What | Environment | When it runs |
 |---|---|---|---|
-| T1 unit | Pure CBOR/model logic (core-model): canonical encoding, strict decode, wire structures, status table | none | default `cargo test`, every CI commit |
+| T1 unit | Pure CBOR/model logic (core-model): canonical encoding, strict decode, wire structures, status table | none | default `cargo test`, every CI commit (`.github/workflows/ci.yml`) |
 | T2 soft-token integration | Full ceremony against `transport-soft` via the shared `Transport`/`Device` traits | no hardware, no root, no udev | default `cargo test`, every CI commit — **the CI contract** |
 | T3 hardware | Same ceremonies against physical authenticators | the device under test + a human | manual only, behind a gate |
 
@@ -47,10 +47,11 @@ mandatory-matrix requirement for the normative table; summary:
   `rust-version = "1.75"`, async-core OQ-1) and on **stable**.
 - **Clippy**: zero warnings (warnings denied), all workspace crates.
 - **fmt**: `cargo fmt --check`.
-- **Fuzz smoke**: time-boxed coverage-guided run of the CBOR decoder target
-  over a committed seed corpus; any panic/abort fails CI. Longer campaigns
-  run outside CI. Rationale: the decoder parses attacker-controlled bytes
-  from a USB/NFC device.
+- **Fuzz smoke**: spec'd in the `testing-strategy` change (time-boxed
+  coverage-guided run of the CBOR decoder target over a committed seed
+  corpus; rationale: the decoder parses attacker-controlled bytes from a
+  USB/NFC device). NOT yet implemented — no fuzz target exists in the
+  repo; it is roadmap, tracked by `openspec/changes/testing-strategy/`.
 
 ## Conformance vectors
 
@@ -60,8 +61,9 @@ Two labeled sources only (cleanroom rules; config.yaml docs rule):
   (CTAP2.1 §6) where they exist; ground truth for canonical CBOR.
 - **constructed** — generated from `transport-soft` snapshots under the
   deterministic seeded RNG (see docs/transport-soft.md §Conformance vectors);
-  committed under `fixtures/`; CI regenerates and asserts byte-identical
-  output.
+  committed under `fixtures/` with CI regenerate-and-assert. NOT yet
+  implemented — no `fixtures/` directory or generation script exists;
+  roadmap, tracked by `openspec/changes/testing-strategy/`.
 
 Never commit blobs captured from third-party authenticators.
 
@@ -69,12 +71,13 @@ Never commit blobs captured from third-party authenticators.
 
 ### Enabling
 
-T3 tests are gated (cargo feature `hardware-tests` or env
-`FIDOH_HARDWARE_TESTS=1` — design OQ-1) and **never run by default**. Run one
-matrix row at a time with the matching device attached. All touch waits are
-bounded by the ceremony deadline (default 30 s budget, per async-core); a row
-that does not produce its expected outcome within the deadline FAILS — it
-does not hang.
+T3 tests are gated behind the env var `FIDOH_HARDWARE_TESTS=1`
+(design OQ-1; there is deliberately no cargo feature — tests compile with
+the normal feature set) and **never run by default**. Run one matrix row at
+a time with the matching device attached. Touch waits are bounded by the
+ceremony budget (45 s default in the shipped CLI, `run.rs::DEFAULT_BUDGET`;
+wait slices are 30 s per async-core); a row that does not produce its
+expected outcome within the deadline FAILS — it does not hang.
 
 ### Matrix
 

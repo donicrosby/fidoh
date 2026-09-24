@@ -12,10 +12,15 @@ what each variant means, what usually causes it, and what to do about
 it.
 
 Errors carry a human-readable message (the library's diagnostic
-string; your application prints it) plus structured fields (device
-descriptor, ceremony phase, elapsed-vs-budget). Error messages never
-contain secrets, credential material, or PIN data — safe to paste
-into bug reports.
+string; your application prints it) plus structured fields you can
+branch on: device descriptors (`NoDevice`, `AmbiguousDevice`), the
+expired ceremony phase (`Timeout(Phase)`), typed transport causes
+(errnos, CTAPHID_ERROR codes, PC/SC causes), and typed status values
+(`Ctap(status)`). Not yet in the code: an elapsed-vs-budget data pair
+on `Timeout` — it currently names the phase only; that field set is
+spec'd in `openspec/changes/error-diagnostics/` and lands with that
+change. Error messages never contain secrets, credential material,
+or PIN data — safe to paste into bug reports.
 
 ## Error table
 
@@ -29,7 +34,7 @@ into bug reports.
 | `UpRejected` | User presence/verification refused by the authenticator (0x27 OPERATION_DENIED, 0x3B UP_REQUIRED, and PIN/UV-token codes 0x33/0x34/0x36/0x37/0x3C) | User declined; authenticator requires UV the ceremony can't supply (PIN acquisition is out of fidoh v1 scope) | Touch to confirm when prompted; for UV-required RPs the caller must supply a pinUvAuthToken it obtained itself | ceremony spec (CTAP2.1 §8.2) |
 | `CredentialMismatch` | The returned assertion's credential id is not in the caller's allow list (library-safety check) | Authenticator answered with a foreign credential (should not happen with well-behaved keys); wrong key inserted | Do not accept the assertion; retry with the correct key; the error names the mismatch with a truncated id only | ceremony spec |
 | `Timeout` | The caller's single ceremony budget expired; names the phase (discovery, connect, probe, getAssertion, user-presence, getNextAssertion) and carries elapsed-vs-budget | Budget too small; device contention (another client holding the key — see below); user slow to touch; NFC card left the field mid-poll | Raise the budget; close other FIDO clients (browsers, other tools); retry. Distinct from `UserActionTimeout` | async-core spec (D4) |
-| `Transport` | I/O or framing failure below the status layer, with a typed cause: hidraw open/read/write errnos, CTAPHID_ERROR codes, PC/SC causes (`no-service`, `absent`, `removed`, `sharing`, `protocol`, `reset`, `reader`, `pcsc(code)`, `le`, `sw`) | Permission denied (EACCES); device unplugged; card removed; pcscd down; sharing violation; wedged device | Match on the cause field; most rows in the sections below address a specific cause | [transport-hid.md](transport-hid.md), [transport-pcsc.md](transport-pcsc.md) |
+| `Transport` | I/O or framing failure below the status layer, with a typed cause: hidraw open/read/write errnos, CTAPHID_ERROR codes, PC/SC causes (`no-service`, `no-readers`, `absent`, `removed`, `sharing`, `protocol`, `reset`, `reader`, `timeout`, `pcsc(code)`; ISO 7816 status words appear on typed skips as `not-fido` with the raw SW) | Permission denied (EACCES); device unplugged; card removed; pcscd down; sharing violation; wedged device | Match on the cause field; most rows in the sections below address a specific cause | [transport-hid.md](transport-hid.md), [transport-pcsc.md](transport-pcsc.md) |
 | `Ctap(status)` | Any other authenticator status, carrying core-model's typed CTAP2.1 §8.2 status value (e.g. 0x30 NOT_ALLOWED on a continuation) | Authenticator-specific refusal; retriable codes like 0x06 CHANNEL_BUSY (fidoh never retries implicitly — the caller re-runs the ceremony) | Read the typed status; re-run the ceremony for retriable statuses | ceremony spec (CTAP2.1 §8.2) |
 
 ## Fixing hidraw permission failures (Linux)

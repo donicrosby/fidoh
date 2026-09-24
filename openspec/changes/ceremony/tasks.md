@@ -26,4 +26,4 @@ arrives in later change-sets.
 ## 5. CI testability and validation
 
 - [ ] 5.1 Document the transport-soft CI scenarios (keepalive-then-success, wrong-credential-id, status-code injection, deadline expiry) in `docs/ceremony.md`
-- [ ] 5.2 Validate: `openspec validate ceremony --strict` green
+- [x] 5.2 Validate: `openspec validate ceremony --strict` green

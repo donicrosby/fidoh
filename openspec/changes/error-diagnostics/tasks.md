@@ -12,8 +12,8 @@ arrives in later change-sets.
 
 - [ ] 2.1 Author `docs/errors.md` with the full error table: variant, meaning, likely causes, remediation, relevant doc link (docs/transport-hid.md, docs/transport-pcsc.md)
 - [ ] 2.2 Include copy-paste udev rule snippets (uaccess and plugdev variants) and pcscd diagnostic commands (`systemctl status pcscd`, `pcsc_scan`) in docs/errors.md, plus the contention-vs-permissions disambiguation guide
-- [ ] 2.3 Cross-link docs/errors.md from the error taxonomy section so operators land on it from any typed error
+- [x] 2.3 Cross-link docs/errors.md from the error taxonomy section so operators land on it from any typed error
 
 ## 3. Validation
 
-- [ ] 3.1 Validate: `openspec validate error-diagnostics --strict` green
+- [x] 3.1 Validate: `openspec validate error-diagnostics --strict` green

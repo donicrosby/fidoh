@@ -226,13 +226,21 @@ distinguish "no permission" from "no device" without string parsing.
 hidraw `read()` blocks until a report is available (kernel hidraw
 doc); there is no executor-native readiness story fidoh can rely on
 for arbitrary FIDO devices. Per the async-core blocking-syscall
-policy, `fidoh-transport-hid` performs blocking reads/writes and
-`fidoh-tokio` wraps every one of them in `spawn_blocking`, so executor
-worker threads never stall. Each blocking read is sliced (default
-30 s, the crate-public `DEFAULT_WAIT_SLICE`, caller-overridable) and
-every slice is checked against the remaining ceremony budget — the
-single deadline supplied at ceremony start (async-core D4). An
-unbounded wait anywhere in this transport is a spec violation.
+policy, `fidoh-transport-hid` performs blocking reads/writes.
+Blocking waits are sliced HERE (default 30 s,
+`fidoh_core::DEFAULT_WAIT_SLICE` re-exported as `WAIT_SLICE`,
+caller-overridable) and every slice is checked against the remaining
+ceremony budget — the single deadline supplied at ceremony start
+(async-core D4). An unbounded wait anywhere in this transport is a
+spec violation. The async-side bridge is the slice-level
+`fidoh_tokio::spawn_blocking_slice` (one wait slice = one
+`tokio::task::spawn_blocking` op, drop-detach semantics), and the
+shipped CLI enters through `fidoh_tokio::run`, which drives the
+ceremony future on the runtime's own `block_on` — hardware keepalive
+waits ride the slice bridge from there. A caller hosting ceremonies
+on their own executor should wrap wait slices the same way
+(`spawn_blocking_slice`) rather than calling the blocking transport
+directly on a worker thread.
 
 ## References
 
