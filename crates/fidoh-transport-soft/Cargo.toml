@@ -40,3 +40,8 @@ hex = "0.4"
 # Verifying the token's signatures inside tests (same version as the
 # lib dependency).
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
+# Examples: `assert_minimal` rides the workspace's real timer through
+# the runtime adapter crate (the sanctioned edge below), and hashes
+# clientDataJSON with SHA-256 (same version as the lib dependency).
+fidoh-tokio = { path = "../fidoh-tokio" }
+sha2 = { version = "0.10", default-features = false }
