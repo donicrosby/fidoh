@@ -55,8 +55,12 @@ jobs:
 
       - name: Fuzz cbor_decode_roundtrip (60s smoke)
         working-directory: fuzz
-        run: cargo fuzz run cbor_decode_roundtrip -- -max_total_time=60 -rss_limit_mb=4096
+        # taiki-e ships cargo-fuzz as a static-musl binary whose
+        # default_target() is x86_64-unknown-linux-musl; left alone it
+        # passes --target musl to cargo, where ASAN is incompatible with
+        # static libc. Pin the runner's real gnu triple.
+        run: cargo fuzz run cbor_decode_roundtrip --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
 
       - name: Fuzz cbor_decode_map (60s smoke)
         working-directory: fuzz
-        run: cargo fuzz run cbor_decode_map -- -max_total_time=60 -rss_limit_mb=4096
+        run: cargo fuzz run cbor_decode_map --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
