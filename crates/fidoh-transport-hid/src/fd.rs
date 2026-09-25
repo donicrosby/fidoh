@@ -85,8 +85,22 @@ impl RawFd for HidRawFile {
     fn write_report(&mut self, report: &[u8]) -> Result<(), HidError> {
         debug_assert_eq!(report.len(), REPORT);
         use std::io::Write;
+        // Linux hidraw write(2) ABI: the FIRST byte of each write(2)
+        // is the report ID. Descriptors without numbered reports (the
+        // CTAPHID interface declares none) take `0x00` there; the
+        // kernel strips it before the device sees the data. Writing
+        // the raw 64-byte packet makes the kernel consume the CID's
+        // high byte as a bogus report ID and discard the write — the
+        // token silently never receives anything (OQ-4 hardware-day
+        // finding: INIT survived only by broadcast tolerance; every
+        // CTAP2 command starved). One write(2) carries the whole
+        // padded report — splitting it would emit the 64 bytes as a
+        // second, equally bogus report. Reads stay unpadded: the
+        // kernel already stripped the ID on the in direction.
+        let mut out = [0u8; REPORT + 1];
+        out[1..].copy_from_slice(report);
         self.file
-            .write_all(report)
+            .write_all(&out)
             .map_err(|e| HidError::io("hidraw", "write", format!("{e}")))
     }
 
