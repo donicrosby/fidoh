@@ -129,22 +129,37 @@ mod tests {
         fs::remove_dir_all(&tmp).ok();
     }
 
-    // The production root composes back to the untouched absolute path:
-    // `FsSysfs::system()` + walk's `/sys/class/hidraw` must read the
-    // REAL `/sys/class/hidraw` (a real machine always has the class
-    // dir; empty enumeration here means the composition is broken
-    // again).
+    // The production root composes back to the untouched absolute
+    // path: `FsSysfs::system()` must see `/sys/class/hidraw` (a
+    // double-prefix regression reads /sys/sys/... and fails as
+    // ENOENT). The dir exists on every Linux we target — the kernel
+    // registers the class even with zero devices, so GitHub runners
+    // have it EMPTY; listing parity is therefore only asserted where
+    // raw std::fs actually shows entries (real dev machines).
     #[test]
     fn fs_sysfs_production_root_reads_real_class_dir() {
         let reader = FsSysfs::system();
-        // Some CI runners have no HID at all; the assertion only means
-        // something on machines that do (any dev box with a keyboard).
-        let Ok(names) = reader.read_dir("/sys/class/hidraw") else {
-            return; // genuinely no hidraw class here — nothing to pin
+        reader
+            .read_dir("/sys/class/hidraw")
+            .expect("composition must not double-prefix the root: /sys/class/hidraw unreadable");
+
+        let raw: Vec<String> = match std::fs::read_dir("/sys/class/hidraw") {
+            Ok(rd) => rd
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect(),
+            Err(_) => return, // no sysfs here (non-Linux dev env): nothing to pin
         };
-        assert!(
-            names.iter().any(|n| n.starts_with("hidraw")),
-            "/sys/class/hidraw lists but composition is broken (empty/garbled listing): {names:?}"
+        if raw.is_empty() {
+            return; // zero-HID machine (CI runners): composition pin above suffices
+        }
+        let names = reader
+            .read_dir("/sys/class/hidraw")
+            .expect("first read succeeded");
+        assert_eq!(
+            names.len(),
+            raw.len(),
+            "fidoh listing diverges from raw std::fs: {names:?} vs {raw:?}"
         );
     }
 }
