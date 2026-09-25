@@ -1,0 +1,55 @@
+# Conformance-vector provenance CI (testing-strategy spec requirement
+# "Conformance vector provenance", scenario "Constructed vectors are
+# labeled and regenerable"):
+#
+# 1. Re-run the fixed generation script into a clean temp dir and diff
+#    against the committed vectors/constructed/ — any byte difference
+#    fails the job (regeneration must be clean).
+# 2. `git diff --exit-code -- vectors/` — belt-and-braces: fails if any
+#    committed vector file (or manifest) drifts at all.
+# 3. Run the spec-derived round-trip test explicitly so a provenance or
+#    canonical-encoder failure is legible as its own red job, not buried
+#    in the full workspace test matrix (which the main ci.yml already
+#    runs).
+#
+# Least privilege: read-only; the job never touches the API.
+name: vectors
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: vectors-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: vectors
+
+      - name: Regenerate constructed vectors into a clean dir
+        run: cargo run --locked -p fidoh-transport-soft --example generate_vectors -- /tmp/vecgen
+
+      - name: Regeneration is byte-identical to committed vectors
+        run: |
+          diff -r /tmp/vecgen vectors/constructed
+          echo "regeneration clean: rc=$?"
+
+      - name: No drift in committed vectors
+        run: git diff --exit-code -- vectors/
+
+      - name: Spec-derived round-trip test
+        run: cargo test --locked -p fidoh-core --test conformance_vectors
