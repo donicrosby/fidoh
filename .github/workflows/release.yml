@@ -27,8 +27,8 @@ jobs:
             $0 ~ "^## " ver {flag = 1; next}
             /^## / && flag {exit}
             flag {print}
-          ' CHANGELOG.md > body.md
-          test -s body.md || { echo "no CHANGELOG section for $VER" >&2; exit 1; }
+          ' CHANGELOG.md > /tmp/body.md
+          test -s /tmp/body.md || { echo "no CHANGELOG section for $VER" >&2; exit 1; }
 
       - name: Publish crates to crates.io (dependency order, retry-aware)
         env:
@@ -85,5 +85,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "fidoh $GITHUB_REF_NAME" --notes-file body.md \
-            || gh release edit "$GITHUB_REF_NAME" --notes-file body.md
+          gh release create "$GITHUB_REF_NAME" --title "fidoh $GITHUB_REF_NAME" --notes-file /tmp/body.md \
+            || gh release edit "$GITHUB_REF_NAME" --notes-file /tmp/body.md
