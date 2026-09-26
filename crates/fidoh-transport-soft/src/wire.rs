@@ -79,18 +79,36 @@ pub(crate) fn authenticator_data(
 }
 
 /// The pinned-AAGUID getInfo response model (CTAP2.1 §6.4;
-/// transport-soft spec "authenticatorGetInfo"). `uv_capable` reflects
-/// the configured UV mode capability.
-pub(crate) fn get_info_response(uv_capable: bool) -> GetInfoResponse {
+/// transport-soft spec "authenticatorGetInfo") — clientPIN-capable
+/// variant (add-client-pin task 4.2): `uv_capable` reflects the
+/// configured UV mode capability; `pin_feature` false keeps the v1
+/// byte-shape exactly (no clientPin members, no protocols). When
+/// armed, the harness-configured `protocols` list and the
+/// `advertise_pin_uv_auth_token` switch shape the clientPIN feature
+/// advertisement (false models the CTAP2.0 getPinToken-only token —
+/// the platform then falls back to subcommand 0x05).
+pub(crate) fn get_info_response_with_protocols(
+    uv_capable: bool,
+    pin_feature: bool,
+    protocols: &[fidoh_core::pin::PinUvAuthProtocol],
+    advertise_pin_uv_auth_token: bool,
+) -> GetInfoResponse {
     let mut options = alloc::collections::BTreeMap::new();
     options.insert(String::from("rk"), true);
     options.insert(String::from("up"), true);
     options.insert(String::from("uv"), uv_capable);
+    if pin_feature {
+        options.insert(String::from("clientPin"), true);
+        if advertise_pin_uv_auth_token {
+            options.insert(String::from("pinUvAuthToken"), true);
+        }
+    }
     GetInfoResponse {
         versions: alloc::vec![String::from("FIDO_2_0"), String::from("FIDO_2_1")],
         extensions: None,
         aaguid: AAGUID,
         options: Some(AuthenticatorOptions { entries: options }),
+        pin_uv_auth_protocols: pin_feature.then(|| protocols.to_vec()),
         ..Default::default()
     }
 }

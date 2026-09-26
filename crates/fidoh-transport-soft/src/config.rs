@@ -64,6 +64,27 @@ pub struct KeepaliveEvent {
     pub spacing: Duration,
 }
 
+/// clientPIN-specific injection knobs (add-client-pin, transport-soft
+/// spec "clientPIN error injection"). Applied by the authenticator
+/// core on authenticatorClientPIN (0x06) processing; all default to
+/// off so the default build answers per the plain §6.5.5 flow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClientPinKnobs {
+    /// Accept the platform handshake on a protocol that was NOT the
+    /// one requested: the getKeyAgreement register (and the shared
+    /// secret the token derives) uses `wrong_protocol_to` while the
+    /// client believes it negotiated its own selector. Exercises the
+    /// CLIENT's protocol-exact verification (KDF choice + MAC length
+    /// + token length) against a deviant peer.
+    pub wrong_protocol_echo: bool,
+    /// Decrypt pinHashEnc with a DIFFERENT key than the correctly
+    /// derived shared secret (the token derives P2 when the client
+    /// used P1 and vice versa), so the client's own
+    /// decapsulate/derive path is proven — the resulting failure is
+    /// the authenticator-side 0x31/0x33 family, NOT a wrong PIN.
+    pub pin_echo_decrypt: bool,
+}
+
 /// Authenticator configuration (docs/transport-soft.md knob table).
 pub struct Config {
     /// UP behavior mode (default `auto-approve`).
@@ -78,6 +99,19 @@ pub struct Config {
     pub rng: RngConfig,
     /// Error-injection knobs.
     pub knobs: Knobs,
+    /// The advertised pinUvAuthProtocols list when the clientPIN
+    /// feature is armed (add-client-pin: the harness config; default
+    /// `[2, 1]` = the authenticator's decreasing preference order,
+    /// CTAP2.1 §6.4). An empty list advertises no protocols — the
+    /// acquisition flow's "no mutually supported protocol" typed
+    /// failure then applies.
+    pub pin_uv_auth_protocols: alloc::vec::Vec<fidoh_core::pin::PinUvAuthProtocol>,
+    /// Whether the `pinUvAuthToken` option ID is advertised when the
+    /// clientPIN feature is armed (default true = the §6.5.5.7.2 0x09
+    /// flow; false = the CTAP2.0 getPinToken 0x05 fallback shape).
+    pub advertise_pin_uv_auth_token: bool,
+    /// clientPIN-directed injection knobs (see [`ClientPinKnobs`]).
+    pub client_pin_knobs: ClientPinKnobs,
 }
 
 impl Default for Config {
@@ -88,6 +122,12 @@ impl Default for Config {
             initial_sign_count: 0,
             rng: RngConfig::Default,
             knobs: Knobs::default(),
+            pin_uv_auth_protocols: alloc::vec![
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                fidoh_core::pin::PinUvAuthProtocol::One,
+            ],
+            advertise_pin_uv_auth_token: true,
+            client_pin_knobs: ClientPinKnobs::default(),
         }
     }
 }
@@ -100,6 +140,12 @@ impl core::fmt::Debug for Config {
             .field("initial_sign_count", &self.initial_sign_count)
             .field("rng", &self.rng)
             .field("knobs", &self.knobs)
+            .field("pin_uv_auth_protocols", &self.pin_uv_auth_protocols)
+            .field(
+                "advertise_pin_uv_auth_token",
+                &self.advertise_pin_uv_auth_token,
+            )
+            .field("client_pin_knobs", &self.client_pin_knobs)
             .finish()
     }
 }

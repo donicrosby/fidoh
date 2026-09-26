@@ -71,7 +71,7 @@ mod wire;
 
 pub use auth::{
     CredentialRecord, MakeCredentialArgs, MintedCredential, SoftAuthenticator, AAGUID,
-    MAX_ASSERTION_QUEUE,
+    MAX_ASSERTION_QUEUE, MAX_PIN_RETRIES,
 };
 pub use config::{Config, KeepaliveEvent, Knobs, RngConfig, UpUvMode};
 pub use device::{SoftDevice, SoftDeviceCore, SoftTransport};

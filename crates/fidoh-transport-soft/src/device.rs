@@ -3,6 +3,7 @@
 //! plus all error-injection knob handling (keepalive sequences,
 //! delays, status injection — design's "transport shim" layer).
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -18,7 +19,7 @@ use spin::Mutex;
 
 use crate::auth::SoftAuthenticator;
 use crate::config::{Config, UpUvMode};
-use crate::rng::soft_err;
+use crate::rng::{soft_err, RngSource};
 use crate::wire;
 use crate::DELAY_HARD_CAP;
 
@@ -158,6 +159,7 @@ impl Device for SoftDevice {
             CtapCommand::GetAssertion(request) => {
                 self.exchange_get_assertion(request, deadline, phase)
             }
+            CtapCommand::ClientPin(request) => self.exchange_client_pin(request),
         }
     }
 
@@ -196,6 +198,70 @@ impl SoftDevice {
             status: StatusCode::Ok.to_u8(),
             body,
         })
+    }
+
+    /// One authenticatorClientPIN (0x06) exchange (add-client-pin):
+    /// status-injection knob first (knob (a) fires here exactly as on
+    /// getAssertion), then the authenticator-core state machine. The
+    /// soft token's key generation/token minting entropy comes from the
+    /// SAME injected `RngSource` as credential keys — deterministic
+    /// fixtures stay byte-reproducible.
+    fn exchange_client_pin(
+        &mut self,
+        request: &fidoh_core::pin::ClientPinRequest,
+    ) -> Result<DeviceEvent, Error> {
+        let mut core = self.core.lock();
+        if let Some(status) = take_injected_status(&mut core) {
+            return Ok(DeviceEvent::Response {
+                status: status.to_u8(),
+                body: Vec::new(),
+            });
+        }
+        // Bridge the token's RngSource onto the PinEntropySource seam.
+        // The stream is temporarily taken out of the core so the state
+        // machine can run on `&mut core` while drawing entropy (the
+        // stream is put back before ANY return path).
+        let mut rng_stream = core::mem::replace(
+            &mut core.rng,
+            Box::new(crate::rng::DeterministicRng::build_salted()),
+        );
+        let mut entropy = SoftEntropy {
+            rng: &mut rng_stream,
+        };
+        let outcome = core.client_pin_exchange(request, &mut entropy);
+        core.rng = rng_stream;
+        match outcome {
+            Ok(response) => {
+                let value = fidoh_core::cbor::CborValue::Map(encode_client_pin_response(&response));
+                let body = value
+                    .encode()
+                    .map_err(|e| soft_err(alloc::format!("{e}")))?;
+                Ok(DeviceEvent::Response {
+                    status: StatusCode::Ok.to_u8(),
+                    body,
+                })
+            }
+            Err(status) => {
+                // 0x31 carries the pinRetries member per §6.5.5 (the
+                // client surfaces it typed).
+                let body = if status == StatusCode::PinInvalid {
+                    let retries = core.pin_retries().unwrap_or_default();
+                    let value = fidoh_core::cbor::CborValue::Map(alloc::vec![(
+                        fidoh_core::cbor::CborValue::Int(0x03),
+                        fidoh_core::cbor::CborValue::Int(i128::from(retries)),
+                    )]);
+                    value
+                        .encode()
+                        .map_err(|e| soft_err(alloc::format!("{e}")))?
+                } else {
+                    Vec::new()
+                };
+                Ok(DeviceEvent::Response {
+                    status: status.to_u8(),
+                    body,
+                })
+            }
+        }
     }
 
     fn exchange_get_assertion(
@@ -490,6 +556,43 @@ fn take_injected_status(core: &mut SoftAuthenticator) -> Option<StatusCode> {
     } else {
         core.knobs.inject_status.take()
     }
+}
+
+/// Bridge the token's `RngSource` onto the crypto layer's
+/// `PinEntropySource` seam (the soft token has ONE injected entropy
+/// stream; fixtures stay deterministic across both).
+struct SoftEntropy<'a> {
+    rng: &'a mut Box<dyn RngSource + Send>,
+}
+
+impl fidoh_core::crypto::PinEntropySource for SoftEntropy<'_> {
+    fn fill_random(&mut self, dest: &mut [u8]) -> Result<(), fidoh_core::crypto::PinCryptoError> {
+        self.rng
+            .fill(dest)
+            .map_err(|_| fidoh_core::crypto::PinCryptoError::Random)
+    }
+}
+
+/// Response-map encoding for a successful clientPIN exchange
+/// (CTAP2.1 §6.5.5 response members; absent members omitted).
+fn encode_client_pin_response(
+    response: &fidoh_core::pin::ClientPinResponse,
+) -> alloc::vec::Vec<(fidoh_core::cbor::CborValue, fidoh_core::cbor::CborValue)> {
+    use fidoh_core::cbor::CborValue;
+    let mut entries = alloc::vec::Vec::new();
+    if let Some(ka) = &response.key_agreement {
+        entries.push((CborValue::Int(0x01), ka.clone()));
+    }
+    if let Some(token) = &response.pin_uv_auth_token {
+        entries.push((CborValue::Int(0x02), CborValue::Bytes(token.clone())));
+    }
+    if let Some(retries) = response.pin_retries {
+        entries.push((CborValue::Int(0x03), CborValue::Int(i128::from(retries))));
+    }
+    if let Some(retries) = response.uv_retries {
+        entries.push((CborValue::Int(0x05), CborValue::Int(i128::from(retries))));
+    }
+    entries
 }
 
 /// Consume a duration from the shared ceremony budget
