@@ -40,7 +40,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
@@ -710,7 +710,12 @@ fn status_injection_matrix_maps_typed() {
         (StatusCode::OperationDenied, CeremonyError::UpRejected),
         (StatusCode::UpRequired, CeremonyError::UpRejected),
         (StatusCode::PinAuthInvalid, CeremonyError::UpRejected),
-        (StatusCode::PinAuthBlocked, CeremonyError::UpRejected),
+        (
+            StatusCode::PinAuthBlocked,
+            // add-client-pin D5: 0x34 moved OUT of the v1 UpRejected
+            // catch-all into its own typed variant (power-cycle fix).
+            CeremonyError::PinAuthBlocked,
+        ),
         (StatusCode::PuatRequired, CeremonyError::UpRejected),
         (StatusCode::PinPolicyViolation, CeremonyError::UpRejected),
         (StatusCode::UvBlocked, CeremonyError::UpRejected),
@@ -739,6 +744,11 @@ fn status_injection_matrix_maps_typed() {
         allow_credentials: Some(vec![descriptor(&minted.record.id)]),
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: Discouraged never acquires a token, so these
+        // stay inert (no provider, no pinned protocol, no entropy).
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: None,
     };
     let err = block_on(Ceremony::run(
@@ -804,6 +814,11 @@ fn three_credentials_drained_in_order() {
         allow_credentials: None,
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: Discouraged never acquires a token, so these
+        // stay inert (no provider, no pinned protocol, no entropy).
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: Some(soft_drain(drainer, drain_deadline)),
     };
     let out = block_on(Ceremony::run(exchange, device, &deadline, no_sleep()))
@@ -845,6 +860,11 @@ fn continuation_refused_surfaces_typed_ctap() {
         allow_credentials: None,
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: Discouraged never acquires a token, so these
+        // stay inert (no provider, no pinned protocol, no entropy).
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         // The device grants the §6.2 response (numberOfCredentials = 2)
         // but refuses the continuation: 0x30 immediately.
         drain: Some(Drain::new(move || {
@@ -1037,6 +1057,11 @@ fn exchange_only_trait_path_matches_full_entry() {
         allow_credentials: Some(vec![descriptor(&minted.record.id)]),
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: Discouraged never acquires a token, so these
+        // stay inert (no provider, no pinned protocol, no entropy).
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: None,
     };
     let out = block_on(Ceremony::run(
@@ -1060,4 +1085,1025 @@ fn exchange_only_trait_path_matches_full_entry() {
     assert_eq!(out.info.aaguid, AAGUID);
     // Exchange-only path has no discovery to report.
     assert!(out.discovery_diagnostics.is_empty());
+}
+
+// ====================================================================
+// add-client-pin (v2) — scenario-ID tests for the ceremony spec's
+// pinUvAuthToken acquisition flow, the PIN-provider seam, and the
+// typed PIN error surface (task 5.1:
+// openspec/changes/add-client-pin/specs/ceremony/spec.md).
+//
+// Every walk drives the REAL clientPIN protocol end to end against
+// the soft token's §6.5.5 authenticator-side state machine: platform
+// P-256 key agreement, AES-encrypted pinHashEnc, encrypted token,
+// ECDSA assertion — no stubbed crypto on either side.
+// ====================================================================
+
+use fidoh_core::crypto::PinEntropySource;
+use fidoh_core::pin::{PinProvider, PinProviderHandle, PinSourceError};
+use fidoh_transport_soft::MAX_PIN_RETRIES;
+use sha2::{Digest, Sha256};
+
+/// A count-down PIN provider: hands the fixture PIN on the first call,
+/// then fails (the seam is single-shot per acquisition; a second
+/// successful prompt inside one run would be a library bug — and the
+/// call counter is the test's observability into "at most once").
+struct CountingPin {
+    pin: &'static [u8],
+    calls: Arc<AtomicUsize>,
+}
+
+impl PinProvider for CountingPin {
+    fn provide_pin(&mut self) -> Result<Vec<u8>, PinSourceError> {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        if n == 0 {
+            Ok(self.pin.to_vec())
+        } else {
+            Err(PinSourceError { _context: () })
+        }
+    }
+}
+
+/// Build a provider handle plus the shared call counter.
+fn provider(pin: &'static [u8]) -> (PinProviderHandle, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handle = PinProviderHandle::from_closure({
+        let calls = Arc::clone(&calls);
+        move || {
+            let mut p = CountingPin {
+                pin,
+                calls: Arc::clone(&calls),
+            };
+            p.provide_pin()
+        }
+    });
+    (handle, calls)
+}
+
+/// The injectable entropy for the ceremony side (platform key pair +
+/// protocol-2 IVs): deterministic SplitMix64, mirroring the token's
+/// own seeded stream so fixtures stay byte-reproducible.
+struct FixtureEntropy(u64);
+
+impl PinEntropySource for FixtureEntropy {
+    fn fill_random(&mut self, dest: &mut [u8]) -> Result<(), fidoh_core::crypto::PinCryptoError> {
+        for chunk in dest.chunks_mut(8) {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            chunk.copy_from_slice(&z.to_be_bytes()[..chunk.len()]);
+        }
+        Ok(())
+    }
+}
+
+/// A PIN-set soft token behind a transport, plus the shared core
+/// handle (the retry counter's introspection point).
+fn pin_token(auth_pin: &'static [u8]) -> (SoftTransport, fidoh_transport_soft::SoftDeviceCore) {
+    let mut auth = token();
+    let _ = mint(&mut auth, b"ci-user-1");
+    auth.set_pin(auth_pin);
+    let t = SoftTransport::new(auth);
+    let core = t.core();
+    (t, core)
+}
+
+/// A `Preferred` full-entry ceremony over `transport` with the given
+/// provider, caller-pinned protocol, and injected entropy.
+fn pin_ceremony(
+    transport: SoftTransport,
+    handle: PinProviderHandle,
+    protocol: Option<fidoh_core::pin::PinUvAuthProtocol>,
+) -> GetAssertionCeremony<SoftTransport> {
+    let mut ceremony = GetAssertionCeremony::new(
+        vec![transport],
+        String::from(RP),
+        CLIENT_HASH.to_vec(),
+        BUDGET,
+    );
+    ceremony.user_verification = UvPolicy::Preferred;
+    ceremony.pin_provider = Some(handle);
+    ceremony.pin_uv_auth_protocol = protocol;
+    ceremony.entropy = Some(Box::new(FixtureEntropy(0xC1B0_1D05)));
+    ceremony
+}
+
+/// Drive ONE real authenticatorClientPIN token request with a WRONG
+/// PIN straight through the `Device` trait (harness-level burn-down:
+/// exactly one counter decrement per call, observable via the 0x31
+/// body's pinRetries member). The §6.5.6/§6.5.7 platform side is
+/// reproduced with the same fidoh-core crypto primitives the ceremony
+/// itself uses.
+/// LEFT(SHA-256(bytes), 16) — the §6.5.6/§6.5.7 pinHash payload.
+fn sha2_of(bytes: &[u8]) -> [u8; 16] {
+    let d = Sha256::digest(bytes);
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&d[..16]);
+    out
+}
+
+fn wrong_pin_hop(
+    device: &mut SoftDevice,
+    protocol: fidoh_core::pin::PinUvAuthProtocol,
+    deadline: &Deadline,
+) -> Option<u8> {
+    use fidoh_core::cbor::CborValue;
+    use fidoh_core::crypto::PlatformKeyAgreement;
+    use fidoh_core::device::CtapCommand;
+    use fidoh_core::pin::{permissions, ClientPinRequest, ClientPinSubCommand};
+
+    let mut entropy = FixtureEntropy(0xDE_C0_1D);
+    let platform = PlatformKeyAgreement::generate(&mut entropy).unwrap();
+    let ka_request = ClientPinRequest {
+        protocol,
+        sub_command: ClientPinSubCommand::GetKeyAgreement,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: None,
+        permissions: None,
+        rp_id: None,
+    };
+    let ka_event = block_on(device.send(&CtapCommand::ClientPin(ka_request), deadline, no_sleep()))
+        .expect("getKeyAgreement hop");
+    let DeviceEvent::Response { status: 0x00, body } = ka_event else {
+        panic!("getKeyAgreement must succeed on an armed token");
+    };
+    let peer_key = match CborValue::decode_map(&body, fidoh_core::DecodePolicy::Strict) {
+        Ok(v) => fidoh_core::pin::ClientPinResponse::from_cbor(&v)
+            .expect("decode keyAgreement response")
+            .key_agreement
+            .expect("keyAgreement member present"),
+        Err(e) => panic!("getKeyAgreement body decode: {e}"),
+    };
+    let shared = platform.encapsulate(&peer_key, protocol).unwrap();
+
+    // pinHashEnc of the WRONG pin: LEFT(SHA-256(wrong), 16).
+    // LEFT(SHA-256(wrong PIN), 16) — anything but the stored hash; the
+    // §6.5.5.7.2 compare (not AES-CBC) is what answers 0x31.
+    let wrong = sha2_of(b"definitely-not-the-pin");
+    let wrong_hash = wrong;
+    let pin_hash_enc = shared.encrypt(&mut entropy, &wrong_hash).unwrap();
+    let token_request = ClientPinRequest {
+        protocol,
+        sub_command: ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: Some(pin_hash_enc),
+        permissions: Some(permissions::GA),
+        rp_id: Some(String::from(RP)),
+    };
+    let event = block_on(device.send(&CtapCommand::ClientPin(token_request), deadline, no_sleep()))
+        .expect("token-request hop");
+    let DeviceEvent::Response { status, body } = event else {
+        panic!("token request must return a terminal response");
+    };
+    if status == fidoh_core::StatusCode::PinInvalid.to_u8() {
+        // The 0x31 body carries pinRetries (0x03) per §6.5.5.
+        if let Ok(v) = CborValue::decode_map(&body, fidoh_core::DecodePolicy::Tolerant) {
+            if let Ok(r) = fidoh_core::pin::ClientPinResponse::from_cbor(&v) {
+                return r.pin_retries;
+            }
+        }
+        return None;
+    }
+    panic!("burn-down hop must answer 0x31 PIN_INVALID, got status {status:#x}");
+}
+
+// --------------------------------------------------------------------
+// Scenario: Preferred with provider on a PIN-set protocol-2 token end
+// to end — the full §6.5.5 acquisition: getKeyAgreement (0x02), the
+// [2, 1] advertisement negotiating protocol 2, ONE PIN-provider
+// callback, getPinUvAuthTokenUsingPinWithPermissions (0x09 with
+// permissions 0x02 + rpId), the getAssertion request carrying
+// pinUvAuthParam over the bare clientDataHash (published §6.2 shape —
+// OQ-9's centralized `pin_uv_auth_param_message`), the
+// authenticator-side verification passing, and the outcome REPORTING
+// `UvEffective::PinUvAuthToken`.
+// --------------------------------------------------------------------
+#[test]
+fn pin_uv_acquisition_end_to_end_protocol_two() {
+    let (t, core) = pin_token(b"correct horse battery staple");
+    let (handle, calls) = provider(b"correct horse battery staple");
+    let ceremony = pin_ceremony(t, handle, None);
+
+    let out = run(ceremony).expect("protocol-2 acquisition must complete end to end");
+
+    // Exactly ONE prompt, consumed by this run (provider seam: at most
+    // once per acquisition).
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // The probe advertised the full clientPIN feature set with [2, 1]
+    // preference order and the pinUvAuthToken option (which selected
+    // the 0x09 subcommand).
+    assert_eq!(
+        out.info.pin_uv_auth_protocols.as_deref(),
+        Some(
+            &[
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                fidoh_core::pin::PinUvAuthProtocol::One,
+            ][..]
+        )
+    );
+    assert!(out.info.option(fidoh_core::get_info::OptionId::ClientPin));
+    assert!(out
+        .info
+        .option(fidoh_core::get_info::OptionId::PinUvAuthToken));
+
+    // The token-backed posture is REPORTED, never silent.
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::PinUvAuthToken);
+
+    // The authenticator VERIFIED the pinUvAuthParam-backed request:
+    // UV flag set in authenticatorData (byte 32, bit 2 — WebAuthn L2
+    // §6.1), assertion returned and signed under the minted key.
+    let first = out.first();
+    assert_eq!(first.auth_data[32] & 0b0000_0100, 0b0000_0100);
+    assert_eq!(
+        first.user.as_ref().map(|u| u.id.as_slice()),
+        Some(&b"ci-user-1"[..])
+    );
+    verify_assertion(
+        &first.auth_data,
+        &first.signature,
+        &minted_public_key(&core),
+        &CLIENT_HASH,
+    )
+    .expect("acquisition-path assertion must verify");
+
+    // Success reset the token's retry counter to maximum (§6.5.5.7.2
+    // authenticator order: success → reset).
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+
+    // §6.2 mutual exclusion is structural: the model's encoder rejects
+    // options.uv alongside pinUvAuthParam (CTAP2.1 §6.2) — so the wire
+    // shape the ceremony built (and the token accepted) necessarily
+    // carried the param WITHOUT options.uv.
+    let mut both = GetAssertionRequest::new(String::from(RP), CLIENT_HASH.to_vec()).unwrap();
+    both.pin_uv_auth_param = Some(fidoh_core::pin::PinUvAuthParam::new(vec![0x44; 32]));
+    both.pin_uv_auth_protocol = Some(fidoh_core::pin::PinUvAuthProtocol::Two);
+    both.options = Some(fidoh_core::get_assertion::GetAssertionOptions {
+        up: None,
+        uv: Some(true),
+    });
+    assert_eq!(
+        both.encode().unwrap_err(),
+        fidoh_core::EncodeError::InvalidRequest(
+            fidoh_core::InvalidRequest::UvOptionWithPinUvAuthParam
+        )
+    );
+}
+
+/// The public key of the fixture credential (the minting happens
+/// inside `pin_token`; the store is reachable through the shared
+/// core).
+fn minted_public_key(
+    core: &fidoh_transport_soft::SoftDeviceCore,
+) -> fidoh_core::cose::CoseEs256Key {
+    let auth = core.lock();
+    auth.credentials()[0].public_key()
+}
+
+// --------------------------------------------------------------------
+// Scenario: getPinToken fallback / protocol-1 acquisition — the token
+// advertises ONLY protocol 1 (so §6.5.5.4's preference-order rule
+// selects P1: SHA-256 KDF, 16-byte truncated MAC, zero-IV AES) AND
+// hides the pinUvAuthToken option ID (so the acquisition selects the
+// CTAP2.0 getPinToken 0x05 subcommand, not 0x09).
+// --------------------------------------------------------------------
+#[test]
+fn pin_uv_acquisition_get_pin_token_fallback_protocol_one() {
+    let mut auth = token();
+    let minted = mint(&mut auth, b"ci-user-1");
+    auth.set_pin(b"p1 fallback pin");
+    auth.set_pin_protocols(vec![fidoh_core::pin::PinUvAuthProtocol::One]);
+    auth.set_advertise_pin_uv_auth_token(false);
+    let t = SoftTransport::new(auth);
+
+    let (handle, calls) = provider(b"p1 fallback pin");
+    let mut ceremony = pin_ceremony(t, handle, None);
+    ceremony.allow_credentials = Some(vec![descriptor(&minted.record.id)]);
+
+    let out = run(ceremony).expect("protocol-1 getPinToken fallback must complete");
+
+    // One prompt; the posture is reported token-backed exactly as in
+    // the P2 path (the subcommand choice is invisible to the outcome —
+    // by design: the platform's §6.2 shape is identical).
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::PinUvAuthToken);
+    // The advertisement the probe saw drove BOTH selections.
+    assert_eq!(
+        out.info.pin_uv_auth_protocols.as_deref(),
+        Some(&[fidoh_core::pin::PinUvAuthProtocol::One][..])
+    );
+    assert!(!out
+        .info
+        .option(fidoh_core::get_info::OptionId::PinUvAuthToken));
+
+    // The P1-shaped request verified authenticator-side: the assertion
+    // returned with the UV flag set (the token accepted the P1 MAC —
+    // a P2 MAC over the same material is 32 bytes and would have
+    // failed the protocol-exact verification).
+    assert_eq!(out.first().credential.id, minted.record.id);
+    assert_eq!(out.first().auth_data[32] & 0b0000_0100, 0b0000_0100);
+    verify_assertion(
+        &out.first().auth_data,
+        &out.first().signature,
+        &minted.record.public_key(),
+        &CLIENT_HASH,
+    )
+    .expect("fallback-path assertion must verify");
+}
+
+// --------------------------------------------------------------------
+// Scenario: Wrong PIN decrements exactly once and surfaces the count —
+// the 0x31 response's pinRetries member becomes
+// `IncorrectPin { remaining_retries: Some(MAX-1) }`, the token's
+// counter reads MAX-1 afterwards (one decrement), Display names the
+// fix without the PIN bytes, and a re-run with the CORRECT PIN
+// succeeds from the same counter (no implicit retry in the failed run).
+// --------------------------------------------------------------------
+#[test]
+fn wrong_pin_surfaces_remaining_retries_and_decrements_once() {
+    let pin = b"the-right-pin";
+    let (t, core) = pin_token(pin);
+    let (handle, calls) = provider(b"a-wrong-pin");
+    let err = run(pin_ceremony(t, handle, None)).unwrap_err();
+
+    match &err {
+        CeremonyError::IncorrectPin { remaining_retries } => {
+            assert_eq!(
+                *remaining_retries,
+                Some(MAX_PIN_RETRIES - 1),
+                "the 0x31 response's pinRetries member surfaces typed"
+            );
+        }
+        other => panic!("expected IncorrectPin, got {other:?}"),
+    }
+    // Decrement ONCE (8 → 7), and the failed run consumed exactly one
+    // provider call (no re-prompt inside the ceremony).
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES - 1));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    // Display names the fix; the no-secrets rule keeps the PIN bytes
+    // out of it.
+    let text = err.to_string();
+    assert!(text.contains("re-enter the PIN"));
+    assert!(!text.contains("a-wrong-pin"));
+
+    // The caller re-runs with a fresh provider call: success from the
+    // SAME counter (the ceremony itself never retried).
+    let mut fresh_auth = token();
+    let _ = mint(&mut fresh_auth, b"ci-user-1");
+    let _ = &fresh_auth;
+    let (handle2, calls2) = provider(pin);
+    // A fresh transport over the SAME authenticator is impossible (the
+    // core moved into the failed ceremony), so the re-run continues on
+    // the token's live state: set the PIN back to the same value on a
+    // rebuilt token with the counter still at 7 — the point of this
+    // half is "correct PIN succeeds after a wrong attempt", which the
+    // soft token models by retry-counter continuity. Rebuild with the
+    // fixture and burn one attempt first to land at 7, then succeed.
+    let mut rebuilt = token();
+    let re_minted = mint(&mut rebuilt, b"ci-user-1");
+    rebuilt.set_pin(pin);
+    let t2 = SoftTransport::new(rebuilt);
+    let core2 = t2.core();
+    {
+        let mut device =
+            block_on(t2.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                .unwrap();
+        let deadline = Deadline::new(BUDGET);
+        let seen = wrong_pin_hop(
+            &mut device,
+            fidoh_core::pin::PinUvAuthProtocol::Two,
+            &deadline,
+        );
+        assert_eq!(seen, Some(MAX_PIN_RETRIES - 1));
+    }
+    let (handle3, _) = provider(pin);
+    let out = run(pin_ceremony(t2, handle3, None))
+        .expect("correct PIN succeeds after a wrong one (same counter)");
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::PinUvAuthToken);
+    assert_eq!(out.first().credential.id, re_minted.record.id);
+    assert_eq!(core2.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+    let _ = handle2;
+    let _ = calls2;
+}
+
+// --------------------------------------------------------------------
+// Scenario: PIN not set maps typed and distinct from wrong PIN — the
+// token advertises the clientPIN feature but stores NO PIN (the
+// harness cleared it), so the PIN-bearing hop is refused with
+// 0x35 CTAP2_ERR_PIN_NOT_SET: a different variant from IncorrectPin in
+// match position AND in Display text (set a PIN, not retype one).
+// --------------------------------------------------------------------
+#[test]
+fn pin_not_set_distinct_from_wrong_pin() {
+    let mut auth = token();
+    let _ = mint(&mut auth, b"ci-user-1");
+    // Arm the clientPIN feature, then clear the secret: getInfo still
+    // advertises clientPin + pinUvAuthToken + protocols, but the
+    // stored hash is gone (§6.5.5 PIN-less posture).
+    auth.set_pin(b"soon gone");
+    auth.clear_pin();
+    let t = SoftTransport::new(auth);
+
+    let (handle, calls) = provider(b"whatever the user typed");
+    let err = run(pin_ceremony(t, handle, None)).unwrap_err();
+
+    // Distinct match position.
+    match err {
+        CeremonyError::PinNotSet => {}
+        other => panic!("expected PinNotSet, got {other:?}"),
+    }
+    // Distinct Display text from IncorrectPin's "re-enter the PIN".
+    let text = CeremonyError::PinNotSet.to_string();
+    assert!(text.contains("set a PIN first"));
+    assert!(!text.contains("re-enter"));
+    // The provider WAS consulted (acquisition reached the token hop);
+    // the failure is the authenticator's answer, typed.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+// --------------------------------------------------------------------
+// Scenario: PIN blocked maps typed after exhaustion — the counter can
+// only drain when the 3-strikes latch is cleared between strike PAIRS
+// (a real key demands a power cycle after 3 consecutive mismatches, so
+// the honest walk to CTAP2_ERR_PIN_BLOCKED alternates wrong PINs with
+// replugs). Burn to zero that way; the exhausting attempt still
+// reports its count (`Some(0)` via 0x31), and the NEXT PIN-bearing hop
+// is refused 0x32 CTAP2_ERR_PIN_BLOCKED (typed `PinBlocked`) BEFORE
+// any comparison — even the CORRECT PIN is refused.
+// --------------------------------------------------------------------
+#[test]
+fn pin_blocked_after_exhaustion() {
+    let pin = b"exhaust-me";
+    let (t, core) = pin_token(pin);
+
+    // Burn the counter to ZERO through the device-command layer: two
+    // consecutive wrong hops, then a harness power cycle (the stand-in
+    // replug that clears the 0x34 latch but NOT the retry counter) —
+    // repeated until the counter is spent.
+    {
+        let mut device =
+            block_on(t.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                .unwrap();
+        let deadline = Deadline::new(BUDGET);
+        for expected in (0..MAX_PIN_RETRIES).rev() {
+            let seen = wrong_pin_hop(
+                &mut device,
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                &deadline,
+            );
+            assert_eq!(
+                seen,
+                Some(expected),
+                "one decrement per hop, count surfaced"
+            );
+            if expected % 2 == 0 {
+                // Never let three mismatches land consecutively.
+                core.lock().power_cycle();
+            }
+        }
+    }
+    assert_eq!(core.lock().pin_retries(), Some(0));
+
+    // The exhausting hop through the full CEREMONY (wrong PIN): the
+    // zero-retries check precedes everything PIN-bearing, so the
+    // ceremony sees typed `PinBlocked` — NOT IncorrectPin{Some(0)}:
+    // no attempt is spent on a blocked token.
+    let (handle, calls) = provider(b"nope");
+    let err = run(pin_ceremony(t, handle, None)).unwrap_err();
+    match err {
+        CeremonyError::PinBlocked => {
+            let text = err.to_string();
+            assert!(text.contains("reset/power-cycle"));
+        }
+        other => panic!("expected PinBlocked at zero retries, got {other:?}"),
+    }
+    // The provider ran (the ceremony cannot know the counter state
+    // before the hop); no comparison happened.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // The typed surface is distinct from IncorrectPin in match
+    // position AND Display text.
+    let pin_text = CeremonyError::PinBlocked.to_string();
+    assert!(!pin_text.contains("re-enter"));
+}
+
+// --------------------------------------------------------------------
+// Scenario: Three consecutive mismatches maps to PinAuthBlocked — the
+// THIRD consecutive mismatch answers 0x31 (transport-soft spec: the
+// latch engages on it) and every SUBSEQUENT PIN-bearing hop answers
+// 0x34 CTAP2_ERR_PIN_AUTH_BLOCKED — typed `PinAuthBlocked` (add-client-
+// pin D5 moved 0x34 OUT of the v1 UpRejected catch-all), even when the
+// PIN is now correct, until the harness "power cycle" clears it.
+// --------------------------------------------------------------------
+#[test]
+fn pin_auth_blocked_after_three_mismatches() {
+    let pin = b"three-strikes-pin";
+    let (t, core) = pin_token(pin);
+
+    // Three CONSECUTIVE wrong PINs through the device-command layer:
+    // strikes 1 and 2 answer 0x31 with falling counts; strike 3
+    // engages the power-cycle latch (the helper still sees its 0x31 —
+    // per §6.5.5.7.2 the mismatching attempt itself is a PIN_INVALID).
+    {
+        let mut device =
+            block_on(t.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                .unwrap();
+        let deadline = Deadline::new(BUDGET);
+        assert_eq!(
+            wrong_pin_hop(
+                &mut device,
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                &deadline
+            ),
+            Some(MAX_PIN_RETRIES - 1),
+            "strike 1: 0x31 with the decremented count"
+        );
+        assert_eq!(
+            wrong_pin_hop(
+                &mut device,
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                &deadline
+            ),
+            Some(MAX_PIN_RETRIES - 2),
+            "strike 2: 0x31 again"
+        );
+        assert_eq!(
+            wrong_pin_hop(
+                &mut device,
+                fidoh_core::pin::PinUvAuthProtocol::Two,
+                &deadline
+            ),
+            Some(MAX_PIN_RETRIES - 3),
+            "strike 3: still 0x31 — but the latch engages now"
+        );
+    }
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES - 3));
+
+    // The FOURTH PIN-bearing hop — through the full CEREMONY (a fresh
+    // transport over the SAME core is not possible: the core is
+    // uniquely owned — so the refused hop runs harness-layer, exactly
+    // what the ceremony drives underneath), with the CORRECT PIN: 0x34.
+    {
+        let mut device =
+            block_on(t.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                .unwrap();
+        let deadline = Deadline::new(BUDGET);
+        let refused = correct_pin_hop(
+            &mut device,
+            pin,
+            fidoh_core::pin::PinUvAuthProtocol::Two,
+            &deadline,
+        );
+        assert!(!refused, "the latched token refuses even the correct PIN");
+        assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES - 3));
+    }
+
+    // The typed surface for that same refusal, through the CEREMONY:
+    // a fresh armed token driven to the latch, then the ceremony run
+    // surfaces PinAuthBlocked (never the v1 UpRejected), and the
+    // Display names the power cycle.
+    {
+        let mut strikes = token();
+        let _ = mint(&mut strikes, b"ci-user-1");
+        strikes.set_pin(pin);
+        let ts = SoftTransport::new(strikes);
+        let cores = ts.core();
+        {
+            let mut device =
+                block_on(ts.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                    .unwrap();
+            let deadline = Deadline::new(BUDGET);
+            for _ in 0..3 {
+                let _ = wrong_pin_hop(
+                    &mut device,
+                    fidoh_core::pin::PinUvAuthProtocol::Two,
+                    &deadline,
+                );
+            }
+        }
+        let (handle, _) = provider(pin);
+        let err = run(pin_ceremony(ts, handle, None)).unwrap_err();
+        assert_eq!(err, CeremonyError::PinAuthBlocked);
+        assert!(!matches!(err, CeremonyError::UpRejected));
+        assert!(err.to_string().contains("power cycle"));
+        assert_eq!(cores.lock().pin_retries(), Some(MAX_PIN_RETRIES - 3));
+    }
+
+    // The harness "power cycle" (unplug/replug) clears the latch: the
+    // SAME token, SAME PIN, SAME retry counter now succeeds.
+    core.lock().power_cycle();
+    let mut device =
+        block_on(t.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep())).unwrap();
+    let deadline = Deadline::new(BUDGET);
+    // A direct correct-PIN token request (harness layer, so the
+    // decrypted token never crosses the ceremony boundary): success
+    // proves the latch is gone and the counter survives.
+    let ok = correct_pin_hop(
+        &mut device,
+        pin,
+        fidoh_core::pin::PinUvAuthProtocol::Two,
+        &deadline,
+    );
+    assert!(
+        ok,
+        "after the power cycle the correct PIN is accepted again"
+    );
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+}
+
+/// One real authenticatorClientPIN token request with the CORRECT PIN
+/// (harness-layer; proves latch-clearing end to end). Returns true on
+/// a 0x00 response carrying a decryptable token.
+fn correct_pin_hop(
+    device: &mut SoftDevice,
+    pin: &[u8],
+    protocol: fidoh_core::pin::PinUvAuthProtocol,
+    deadline: &Deadline,
+) -> bool {
+    use fidoh_core::cbor::CborValue;
+    use fidoh_core::crypto::PlatformKeyAgreement;
+    use fidoh_core::device::CtapCommand;
+    use fidoh_core::pin::{permissions, ClientPinRequest, ClientPinSubCommand};
+
+    let mut entropy = FixtureEntropy(0xC0_27_EE);
+    let platform = PlatformKeyAgreement::generate(&mut entropy).unwrap();
+    let ka = ClientPinRequest {
+        protocol,
+        sub_command: ClientPinSubCommand::GetKeyAgreement,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: None,
+        permissions: None,
+        rp_id: None,
+    };
+    let DeviceEvent::Response { status: 0x00, body } =
+        block_on(device.send(&CtapCommand::ClientPin(ka), deadline, no_sleep())).unwrap()
+    else {
+        panic!("getKeyAgreement must succeed");
+    };
+    let peer = CborValue::decode_map(&body, fidoh_core::DecodePolicy::Strict)
+        .and_then(|v| fidoh_core::pin::ClientPinResponse::from_cbor(&v))
+        .unwrap()
+        .key_agreement
+        .unwrap();
+    let shared = platform.encapsulate(&peer, protocol).unwrap();
+    let pin_hash = sha2_of(pin);
+    let pin_hash_enc = shared.encrypt(&mut entropy, &pin_hash).unwrap();
+    let req = ClientPinRequest {
+        protocol,
+        sub_command: ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: Some(pin_hash_enc),
+        permissions: Some(permissions::GA),
+        rp_id: Some(String::from(RP)),
+    };
+    let DeviceEvent::Response { status, body } =
+        block_on(device.send(&CtapCommand::ClientPin(req), deadline, no_sleep())).unwrap()
+    else {
+        panic!("token request must return a terminal response");
+    };
+    if status != 0x00 {
+        return false;
+    }
+    let encrypted = CborValue::decode_map(&body, fidoh_core::DecodePolicy::Strict)
+        .and_then(|v| fidoh_core::pin::ClientPinResponse::from_cbor(&v))
+        .unwrap()
+        .pin_uv_auth_token
+        .unwrap();
+    shared.decrypt(&encrypted).is_ok()
+}
+
+// --------------------------------------------------------------------
+// Scenario: Budget expiry mid-acquisition names ClientPin — the
+// shared budget dies between the getKeyAgreement hop and the token
+// request; the ceremony returns Timeout(ClientPin) (no independent
+// per-hop timeout existed), and a fresh ceremony over a fresh token
+// succeeds (cancellation safety).
+// --------------------------------------------------------------------
+#[test]
+fn budget_expiry_mid_acquisition_names_client_pin() {
+    // A device wrapper that exhausts the budget after the FIRST
+    // clientPIN command (getKeyAgreement) by draining the shared
+    // deadline inside its `send` — the honest model of "the caller's
+    // budget ran out mid-acquisition" without real time.
+    struct BudgetDiesAfterFirstPin<S> {
+        inner: S,
+        pin_hops_seen: usize,
+    }
+    impl<S: Device + Send> Device for BudgetDiesAfterFirstPin<S> {
+        async fn send(
+            &mut self,
+            cmd: &CtapCommand,
+            deadline: &Deadline,
+            sleep: fidoh_core::SleepHandle<'_>,
+        ) -> Result<DeviceEvent, Error> {
+            if matches!(cmd, CtapCommand::ClientPin(_)) {
+                self.pin_hops_seen += 1;
+                if self.pin_hops_seen == 1 {
+                    // Let the getKeyAgreement hop through...
+                    let event = self.inner.send(cmd, deadline, sleep).await?;
+                    // ...then consume the ENTIRE remaining budget, so
+                    // the NEXT hop (the token request, still phase
+                    // ClientPin) finds nothing left.
+                    while deadline.consume_slice(Duration::from_secs(1)).is_some() {}
+                    return Ok(event);
+                }
+            }
+            self.inner.send(cmd, deadline, sleep).await
+        }
+        async fn open_channel(
+            &mut self,
+            deadline: &Deadline,
+            sleep: fidoh_core::SleepHandle<'_>,
+        ) -> Result<fidoh_core::device::ChannelId, Error> {
+            self.inner.open_channel(deadline, sleep).await
+        }
+        async fn close(self) -> Result<(), Error> {
+            self.inner.close().await
+        }
+    }
+
+    let mut auth = token();
+    let _ = mint(&mut auth, b"ci-user-1");
+    auth.set_pin(b"budget-expiry-pin");
+    let t = SoftTransport::new(auth);
+    let device =
+        block_on(t.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep())).unwrap();
+
+    let (handle, calls) = provider(b"budget-expiry-pin");
+    let exchange = GetAssertionExchange {
+        rp_id: String::from(RP),
+        client_data_hash: CLIENT_HASH.to_vec(),
+        allow_credentials: None,
+        user_verification: UvPolicy::Preferred,
+        pin_uv_auth: None,
+        pin_provider: Some(handle),
+        pin_uv_auth_protocol: None,
+        entropy: Some(Box::new(FixtureEntropy(0xB0_D6E7))),
+        drain: None,
+    };
+    let err = block_on(Ceremony::run(
+        exchange,
+        BudgetDiesAfterFirstPin {
+            inner: device,
+            pin_hops_seen: 0,
+        },
+        &Deadline::new(BUDGET),
+        no_sleep(),
+    ))
+    .unwrap_err();
+
+    // Typed timeout naming the CLIENTPIN phase — not GetAssertion,
+    // not GetInfo.
+    assert_eq!(err, CeremonyError::Timeout(Phase::ClientPin));
+    // The provider was consulted exactly once (the flow got as far as
+    // the PIN collection between the hops — collect-before-use);
+    // whatever the user typed died with the budget, nothing leaked.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // Cancellation safety: a fresh ceremony over a fresh token runs
+    // cleanly afterwards.
+    let mut fresh = token();
+    let fresh_mint = mint(&mut fresh, b"ci-user-1");
+    fresh.set_pin(b"fresh-after-expiry");
+    let (handle, _) = provider(b"fresh-after-expiry");
+    let out = run(pin_ceremony(SoftTransport::new(fresh), handle, None))
+        .expect("device remains usable for a subsequent ceremony");
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::PinUvAuthToken);
+    assert_eq!(out.first().credential.id, fresh_mint.record.id);
+}
+
+// --------------------------------------------------------------------
+// Scenario: Preferred WITHOUT a provider on a PIN-only key fails
+// naming the fix — typed `PinRequired` (NOT the v1 silent
+// Discouraged degradation), no authenticatorClientPIN command issued,
+// Display names the fix (supply a PIN provider).
+// --------------------------------------------------------------------
+#[test]
+fn preferred_without_provider_on_pin_only_key_names_fix() {
+    // uv_mode AlwaysFail: the probe reports uv: false — the PIN-only
+    // YubiKey posture (clientPin capable, no built-in verifier).
+    let cfg = Config {
+        uv_mode: UpUvMode::AlwaysFail,
+        ..Config::default()
+    };
+    let mut auth = SoftAuthenticator::new(cfg);
+    let _ = mint(&mut auth, b"ci-user-1");
+    auth.set_pin(b"pin-only-key");
+    let t = SoftTransport::new(auth);
+    let core = t.core();
+
+    // Preferred with NEITHER caller-held material NOR a provider.
+    let mut ceremony =
+        GetAssertionCeremony::new(vec![t], String::from(RP), CLIENT_HASH.to_vec(), BUDGET);
+    ceremony.user_verification = UvPolicy::Preferred;
+
+    let err = run(ceremony).unwrap_err();
+    // Typed PinRequired — never a silent Discouraged downgrade.
+    assert_eq!(err, CeremonyError::PinRequired);
+    let text = err.to_string();
+    assert!(
+        text.contains("PinProviderHandle"),
+        "Display names the fix: {text}"
+    );
+    // No clientPIN command reached the token (no acquisition was
+    // even attempted — the failure is client-side, pre-exchange).
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+}
+
+// --------------------------------------------------------------------
+// Scenario: Discouraged never prompts for a PIN — a provider is
+// supplied but the policy never asks: provide_pin is never invoked
+// and no authenticatorClientPIN command is issued (the ceremony
+// completes token-less).
+// --------------------------------------------------------------------
+#[test]
+fn discouraged_never_prompts() {
+    let (t, core) = pin_token(b"never-asked-for");
+    let (handle, calls) = provider(b"never-asked-for");
+    let mut ceremony = pin_ceremony(t, handle, None);
+    ceremony.user_verification = UvPolicy::Discouraged;
+
+    let out = run(ceremony).expect("discouraged ceremony must not touch the PIN flow");
+    // No prompt, no acquisition, reported as not-requested.
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::NotRequested);
+    // The retry counter is untouched: no PIN-bearing hop ran.
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+}
+
+// --------------------------------------------------------------------
+// Scenario: Caller-held token takes precedence over acquisition —
+// with BOTH pinUvAuth material and a provider supplied, the ceremony
+// sends the caller-held material and never issues an
+// authenticatorClientPIN command: no prompt, and the wire request
+// carries the caller's param (which the token accepts after verifying
+// it — proven here by building the caller-held material from the
+// token's own registered secret… not needed: the caller-held token is
+// arbitrary bytes for the SOFT token only when the MAC check runs —
+// so the walk arms the token, derives a REAL token through one
+// acquisition, then re-runs with it held by the caller).
+// --------------------------------------------------------------------
+#[test]
+fn caller_held_token_takes_precedence() {
+    // Run 1: acquire a REAL token via the provider path.
+    let pin = b"precedence-pin";
+    let (t, core) = pin_token(pin);
+    let (handle, calls) = provider(pin);
+    let out = run(pin_ceremony(t, handle, None)).expect("acquisition run succeeds");
+    assert_eq!(out.uv_effective, fidoh_core::UvEffective::PinUvAuthToken);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+
+    // Run 2 (same counter, same PIN): caller-held material + provider
+    // BOTH supplied. The ceremony must use the held material, never
+    // prompt, never touch the clientPIN state machine.
+    let mut auth2 = token();
+    let minted2 = mint(&mut auth2, b"ci-user-1");
+    auth2.set_pin(pin);
+    let t2 = SoftTransport::new(auth2);
+    let core2 = t2.core();
+    // Mint a caller-held token by running ONE acquisition through the
+    // device-command layer and capturing the decrypted token — the
+    // honest caller posture ("I already hold a token from an earlier
+    // ceremony").
+    let held_param = {
+        use fidoh_core::cbor::CborValue;
+        use fidoh_core::crypto::PlatformKeyAgreement;
+        use fidoh_core::device::CtapCommand;
+        use fidoh_core::pin::{permissions, ClientPinRequest, ClientPinSubCommand};
+
+        let mut device =
+            block_on(t2.connect(&DeviceId::new("soft-0"), &Deadline::new(BUDGET), no_sleep()))
+                .unwrap();
+        let deadline = Deadline::new(BUDGET);
+        let mut entropy = FixtureEntropy(0xCA_11_EE);
+        let platform = PlatformKeyAgreement::generate(&mut entropy).unwrap();
+        let ka = ClientPinRequest {
+            protocol: fidoh_core::pin::PinUvAuthProtocol::Two,
+            sub_command: ClientPinSubCommand::GetKeyAgreement,
+            key_agreement: Some(platform.cose_key()),
+            pin_uv_auth_param: None,
+            pin_hash_enc: None,
+            permissions: None,
+            rp_id: None,
+        };
+        let DeviceEvent::Response { status: 0x00, body } =
+            block_on(device.send(&CtapCommand::ClientPin(ka), &deadline, no_sleep())).unwrap()
+        else {
+            panic!("getKeyAgreement must succeed");
+        };
+        let peer = CborValue::decode_map(&body, fidoh_core::DecodePolicy::Strict)
+            .and_then(|v| fidoh_core::pin::ClientPinResponse::from_cbor(&v))
+            .unwrap()
+            .key_agreement
+            .unwrap();
+        let shared = platform
+            .encapsulate(&peer, fidoh_core::pin::PinUvAuthProtocol::Two)
+            .unwrap();
+        let hash = sha2::Sha256::digest(pin);
+        let pin_hash_enc = shared.encrypt(&mut entropy, &hash[..16]).unwrap();
+        let req = ClientPinRequest {
+            protocol: fidoh_core::pin::PinUvAuthProtocol::Two,
+            sub_command: ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
+            key_agreement: Some(platform.cose_key()),
+            pin_uv_auth_param: None,
+            pin_hash_enc: Some(pin_hash_enc),
+            permissions: Some(permissions::GA),
+            rp_id: Some(String::from(RP)),
+        };
+        let DeviceEvent::Response { status: 0x00, body } =
+            block_on(device.send(&CtapCommand::ClientPin(req), &deadline, no_sleep())).unwrap()
+        else {
+            panic!("token request must succeed");
+        };
+        let encrypted = CborValue::decode_map(&body, fidoh_core::DecodePolicy::Strict)
+            .and_then(|v| fidoh_core::pin::ClientPinResponse::from_cbor(&v))
+            .unwrap()
+            .pin_uv_auth_token
+            .unwrap();
+        let token = shared.decrypt(&encrypted).expect("token decrypts");
+        let message = fidoh_core::crypto::pin_uv_auth_param_message(&CLIENT_HASH);
+        fidoh_core::pin::PinUvAuthParam::new(shared.authenticate(&token, &message))
+    };
+
+    let (handle2, calls2) = provider(b"should-never-be-asked");
+    let mut ceremony2 =
+        GetAssertionCeremony::new(vec![t2], String::from(RP), CLIENT_HASH.to_vec(), BUDGET);
+    ceremony2.user_verification = UvPolicy::Preferred;
+    ceremony2.pin_uv_auth = Some((held_param, fidoh_core::pin::PinUvAuthProtocol::Two));
+    ceremony2.pin_provider = Some(handle2);
+    ceremony2.entropy = Some(Box::new(FixtureEntropy(0xCA_11_EE)));
+
+    let out2 = run(ceremony2).expect("caller-held material rides through");
+    // The held material was sent; the posture reports PinUvAuth (held
+    // param), NOT PinUvAuthToken (no acquisition ran).
+    assert_eq!(out2.uv_effective, fidoh_core::UvEffective::PinUvAuth);
+    // ZERO prompts: the provider was never consulted.
+    assert_eq!(calls2.load(Ordering::SeqCst), 0);
+    // The clientPIN state machine was untouched (no 0x06 command):
+    // counter unchanged from run 2's armed state.
+    assert_eq!(core2.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+    assert_eq!(out2.first().credential.id, minted2.record.id);
+}
+
+// --------------------------------------------------------------------
+// Scenario: Provider failure surfaces typed before any authenticator
+// call — the caller's cancellation maps to `PinProviderFailed`
+// WITHOUT any authenticatorClientPIN round-trip after the provider
+// step (the retry counter is unchanged; the device remains usable).
+// --------------------------------------------------------------------
+#[test]
+fn pin_provider_failure_typed_no_device_traffic() {
+    let (t, core) = pin_token(b"never-obtained");
+    // A provider that fails immediately (user cancelled).
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handle = PinProviderHandle::from_closure({
+        let calls = Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err::<Vec<u8>, _>(PinSourceError { _context: () })
+        }
+    });
+
+    let err = run(pin_ceremony(t, handle, None)).unwrap_err();
+    assert_eq!(err, CeremonyError::PinProviderFailed);
+    // The provider was consulted exactly once; nothing retried.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    // The token's retry counter is UNCHANGED: no PIN-bearing hop ran
+    // after the provider step (acquisition died at the seam).
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
+}
+
+// --------------------------------------------------------------------
+// Scenario: Oversized PIN rejected before device traffic — a 64-byte
+// PIN fails typed `PinTooLong` BEFORE any clientPIN hop that could
+// consume the shared secret or the retry counter (§6.5.5.5 bound).
+// --------------------------------------------------------------------
+#[test]
+fn oversized_pin_rejected_before_device_traffic() {
+    let (t, core) = pin_token(b"real pin on the token");
+    const OVERSIZED: &[u8] = &[b'x'; 64]; // > MAX_PIN_BYTES (63)
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handle = PinProviderHandle::from_closure({
+        let calls = Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(OVERSIZED.to_vec())
+        }
+    });
+
+    let err = run(pin_ceremony(t, handle, None)).unwrap_err();
+    assert_eq!(err, CeremonyError::PinTooLong);
+    let text = err.to_string();
+    assert!(text.contains("63-byte"));
+    // The provider ran (it produced the oversized PIN) but NO retry
+    // counter moved: the rejection happened before the token request.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(core.lock().pin_retries(), Some(MAX_PIN_RETRIES));
 }

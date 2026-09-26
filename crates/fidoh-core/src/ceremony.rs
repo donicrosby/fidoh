@@ -40,19 +40,27 @@ use core::future::Future;
 use core::time::Duration;
 
 use crate::cbor::CborValue;
+use crate::crypto::{
+    pin_uv_auth_param_message, PinCryptoError, PinEntropySource, PlatformKeyAgreement,
+};
 use crate::device::{CtapCommand, Device, DeviceEvent};
 use crate::error::{CeremonyError, DecodePolicy, DiscoveryDiagnostic, Error, TransportError};
 use crate::get_assertion::{
     GetAssertionOptions, GetAssertionRequest, GetAssertionResponse, PublicKeyCredentialDescriptor,
 };
 use crate::get_info::GetInfoResponse;
-use crate::pin::{PinUvAuthParam, PinUvAuthProtocol};
+use crate::pin::{
+    permissions, ClientPinRequest, ClientPinResponse, ClientPinSubCommand, PinProvider,
+    PinProviderHandle, PinUvAuthParam, PinUvAuthProtocol, MAX_PIN_BYTES,
+};
 use crate::sleep::SleepHandle;
 use crate::status::StatusCode;
 use crate::time::{Deadline, Phase};
 use crate::transport::{
     apply_selection, CandidateDescriptor, DeviceInfo, SelectionPolicy, Transport,
 };
+use sha2::{Digest, Sha256};
+use zeroize::{Zeroize, Zeroizing};
 
 // ----------------------------------------------------------------------
 // The async-core `Ceremony` trait: the single orchestration entry point.
@@ -129,26 +137,32 @@ impl Ceremony for EchoCeremony {
 
 /// User-verification policy for the ceremony input (design D4).
 ///
-/// v1 cannot acquire a pinUvAuthToken (clientPIN is a project
-/// non-goal): a caller holding a token passes it via
-/// [`CeremonyInput::pin_uv_auth`]; a `Preferred` policy without a
-/// supplied token degrades to the `Discouraged` wire shape unless the
-/// probe advertised the `uv` capability — and the effective posture is
-/// always REPORTED in the outcome ([`GetAssertionOutcome::
-/// uv_effective`]), never silent.
+/// v2 (add-client-pin): a caller holding a token passes it via
+/// [`CeremonyInput::pin_uv_auth`]; a caller supplying a PIN provider
+/// lets the ceremony ACQUIRE a token per CTAP2.1 §6.5.5 (see the
+/// "pinUvAuthToken acquisition flow" requirement). A `Preferred`
+/// policy with neither — on a key whose probe shows clientPin support
+/// without a built-in verifier — now fails typed
+/// ([`CeremonyError::PinRequired`], naming the fix) instead of v1's
+/// silent degradation to the `Discouraged` wire shape; on a key
+/// advertising the `uv` capability it still sends `options.uv = true`.
+/// The effective posture is always REPORTED in the outcome
+/// ([`GetAssertionOutcome::uv_effective`]), never silent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UvPolicy {
     /// The request omits `options.uv` (CTAP2.1 §6.2 default false) and
     /// carries no pinUvAuthParam unless the caller supplied one
-    /// explicitly. The default.
+    /// explicitly. The default. Never triggers PIN acquisition: no PIN
+    /// prompt is shown for a discouraged request.
     #[default]
     Discouraged,
-    /// Request user verification. With a caller-held pinUvAuthToken
-    /// the param/protocol are sent (and `options.uv` is never set
-    /// alongside them, CTAP2.1 §6.2); without one, `options.uv = true`
-    /// is sent only when the getInfo probe advertised the `uv`
-    /// capability, otherwise the request degrades to `Discouraged` on
-    /// the wire (reported in the outcome).
+    /// Request user verification. Resolution order: (a) caller-held
+    /// pinUvAuthToken → sent (and `options.uv` is never set alongside,
+    /// CTAP2.1 §6.2); (b) caller-supplied PIN provider → acquire a
+    /// token per CTAP2.1 §6.5.5; (c) neither → `options.uv = true`
+    /// when the probe advertised the `uv` capability, else the typed
+    /// [`CeremonyError::PinRequired`] on PIN-capable keys (reported
+    /// degradation paths stay in the outcome).
     Preferred,
 }
 
@@ -169,8 +183,18 @@ struct CeremonyInput {
     user_verification: UvPolicy,
     /// Caller-held pinUvAuth material, passed through opaquely when
     /// the caller already holds a pinUvAuthToken (CTAP2.1 §6.2 keys
-    /// 0x06/0x07). Acquiring a token is a project non-goal.
+    /// 0x06/0x07). Takes PRECEDENCE over acquisition.
     pin_uv_auth: Option<(PinUvAuthParam, PinUvAuthProtocol)>,
+    /// Caller-owned PIN provider (add-client-pin design D3). Consumed
+    /// at most once per run, only by the acquisition flow.
+    pin_provider: Option<PinProviderHandle>,
+    /// Caller-pinned pinUvAuth protocol (§6.5.5.4 alternative to
+    /// following the authenticator's preference order). Rejected typed
+    /// when the probe does not advertise it.
+    pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    /// Entropy for platform key pairs and P2 IVs (add-client-pin
+    /// design D2). Harnesses inject a deterministic stream.
+    entropy: Option<alloc::boxed::Box<dyn PinEntropySource + Send>>,
 }
 
 impl CeremonyInput {
@@ -194,10 +218,9 @@ impl CeremonyInput {
             Some(list) if !list.is_empty() => Some(list.clone()),
             _ => None,
         };
-        // v1 sends no extensions: key 0x04 stays absent by
-        // construction (ceremony spec: "the extensions parameter
-        // (0x04) SHALL be absent").
-        request.extensions = None;
+        // No extensions: key 0x04 stays absent by construction
+        // (ceremony spec: "the extensions parameter (0x04) SHALL be
+        // absent").
 
         // Caller-held pinUvAuth material passes through only when the
         // authenticator supports the chosen protocol (CTAP2.1 §6.5.5,
@@ -221,21 +244,37 @@ impl CeremonyInput {
             // carrying pinUvAuthParam NEVER sets options.uv.
             request.pin_uv_auth_param = Some(param.clone());
             request.pin_uv_auth_protocol = Some(*protocol);
-        } else if self.user_verification == UvPolicy::Preferred
-            && info.option(crate::get_info::OptionId::Uv)
-        {
-            // Preferred without a caller-held token: ask the
-            // authenticator's built-in verifier via options.uv — only
-            // when the probe advertised the `uv` capability.
-            request.options = Some(GetAssertionOptions {
-                up: None,
-                uv: Some(true),
-            });
         }
-        // Preferred without token and without advertised uv capability
-        // degrades to Discouraged on the wire; `uv_effective` in the
-        // outcome reports the degradation (D4: never silent).
         Ok(request)
+    }
+
+    /// The v2 UV decision for a request built WITHOUT caller-held
+    /// material: shape `options.uv`, demand acquisition, or accept the
+    /// reported degradation (add-client-pin design D4 steps 9–10).
+    /// `Preferred` + PIN-capable key + no provider + no built-in
+    /// verifier is the typed `PinRequired` — the motivating case of
+    /// the change (Vaultwarden + PIN-only YubiKey).
+    fn uv_posture_without_token(&self, info: &GetInfoResponse) -> Result<UvShape, CeremonyError> {
+        match self.user_verification {
+            UvPolicy::Discouraged => Ok(UvShape::Omit),
+            UvPolicy::Preferred => {
+                let uv_capable = info.option(crate::get_info::OptionId::Uv);
+                if uv_capable {
+                    // Built-in verifier advertised: keep the v1 shape.
+                    return Ok(UvShape::UvOption);
+                }
+                // No built-in verifier. PIN-capable? (clientPin true —
+                // an absent/false clientPin means the key cannot do UV
+                // at all; keep the v1 degradation report there.)
+                let pin_capable = info.option(crate::get_info::OptionId::ClientPin);
+                if pin_capable {
+                    // PIN-only key: the fix is to supply a provider —
+                    // never a silent downgrade again.
+                    return Err(CeremonyError::PinRequired);
+                }
+                Ok(UvShape::Omit)
+            }
+        }
     }
 
     /// The effective UV posture of the wire request (D4 reporting).
@@ -248,6 +287,16 @@ impl CeremonyInput {
             UvEffective::NotRequested
         }
     }
+}
+
+/// The `options.uv` shaping decision for a token-less request (design
+/// D4 step 9).
+enum UvShape {
+    /// Omit `options.uv` (the §6.2 default-false wire shape).
+    Omit,
+    /// Send `options.uv = true` (probe advertised the `uv`
+    /// capability).
+    UvOption,
 }
 
 /// The effective UV posture of the sent request (design D4: reported,
@@ -263,8 +312,11 @@ pub enum UvEffective {
     /// `options.uv = true` was sent (Preferred without a token, where
     /// the probe advertised the `uv` capability).
     UvOption,
+    /// A pinUvAuthToken was acquired during this ceremony (CTAP2.1
+    /// §6.5.5 flow) and the request carries its pinUvAuthParam
+    /// (add-client-pin: `Preferred` + PIN provider end to end).
+    PinUvAuthToken,
 }
-
 /// The multi-assertion continuation seam (CTAP2.1 §6.3).
 ///
 /// `CtapCommand` (async-core scope) carries GetInfo and GetAssertion
@@ -339,9 +391,14 @@ impl GetAssertionOutcome {
 /// `deadline`. Shared by [`GetAssertionCeremony::run`] (which does
 /// discovery/selection/connect first) and the [`Ceremony`] trait impl
 /// for [`GetAssertionExchange`].
+///
+/// Phase 4a (add-client-pin): the CTAP2.1 §6.5.5 pinUvAuthToken
+/// acquisition, when the preconditions hold (see
+/// [`acquire_pin_uv_auth_token`]). Its hops are named
+/// `Phase::ClientPin` and consume the SAME single budget.
 async fn exchange_pipeline<D: Device + Send>(
     mut device: D,
-    input: CeremonyInput,
+    mut input: CeremonyInput,
     mut drain: Option<Drain>,
     deadline: &Deadline,
     sleep: SleepHandle<'_>,
@@ -360,8 +417,69 @@ async fn exchange_pipeline<D: Device + Send>(
         .await?,
     )?;
 
+    // ---- Phase 4a: pinUvAuthToken acquisition (add-client-pin
+    // design D4) — before request construction, per §6.2.1 step 1.1.
+    let mut acquired_token = false;
+    if input.pin_uv_auth.is_none() {
+        let wants_uv = input.user_verification == UvPolicy::Preferred;
+        let pin_capable = info.option(crate::get_info::OptionId::ClientPin);
+        let protocols_advertised = info
+            .pin_uv_auth_protocols
+            .as_ref()
+            .is_some_and(|list| !list.is_empty());
+        if wants_uv && pin_capable && protocols_advertised {
+            // Split the input fields the acquisition needs from the
+            // mutable provider (borrow discipline: the provider is
+            // taken out; the flow below rebuilds `input` state).
+            let CeremonyInput {
+                ref rp_id,
+                ref client_data_hash,
+                ref pin_uv_auth_protocol,
+                ref mut entropy,
+                pin_provider,
+                ..
+            } = input;
+            let Some(mut provider) = pin_provider else {
+                return Err(CeremonyError::PinRequired);
+            };
+            let (param, protocol) = acquire_pin_uv_auth_token(
+                &mut device,
+                &info,
+                rp_id,
+                client_data_hash,
+                *pin_uv_auth_protocol,
+                &mut provider,
+                entropy
+                    .as_deref_mut()
+                    .expect("entropy injected by the caller for PIN acquisition"),
+                deadline,
+                sleep,
+            )
+            .await?;
+            // §6.2: the param rides with its protocol; options.uv is
+            // never set alongside (mutual exclusion). The provider is
+            // consumed (at most one prompt per run).
+            input.pin_provider = None;
+            input.pin_uv_auth = Some((param, protocol));
+            acquired_token = true;
+        }
+    }
+
     // ---- Phase 5: capability-driven request construction.
-    let wire_request = input.build_request(&info)?;
+    let mut wire_request = input.build_request(&info)?;
+    if input.pin_uv_auth.is_none() {
+        // Token-less shaping: uv option / PinRequired / reported
+        // degradation (design D4 step 9).
+        match input.uv_posture_without_token(&info)? {
+            UvShape::UvOption => {
+                wire_request.options = Some(GetAssertionOptions {
+                    up: None,
+                    uv: Some(true),
+                });
+            }
+            UvShape::Omit => {}
+        }
+    }
 
     // ---- Phase 6: the §6.2 exchange with its keepalive progress loop
     // (D5), bounded by the single remaining budget.
@@ -409,12 +527,250 @@ async fn exchange_pipeline<D: Device + Send>(
         }
     }
 
+    let uv_effective = if acquired_token {
+        UvEffective::PinUvAuthToken
+    } else {
+        CeremonyInput::uv_effective(&wire_request)
+    };
+
     Ok(GetAssertionOutcome {
         assertions,
         info,
-        uv_effective: CeremonyInput::uv_effective(&wire_request),
+        uv_effective,
         discovery_diagnostics: Vec::new(),
     })
+}
+
+/// The CTAP2.1 §6.5.5 pinUvAuthToken acquisition flow (add-client-pin
+/// design D4 steps 1–8; spec requirement "pinUvAuthToken acquisition
+/// flow"). Preconditions are checked by the caller: `Preferred`
+/// policy, a PIN provider present, no caller-held material, and a
+/// probe advertising clientPin + non-empty pinUvAuthProtocols.
+///
+/// Every device hop is bounded by the remaining budget and named
+/// `Phase::ClientPin`; there are no independent timeouts (async-core
+/// D4). The PIN is collected AFTER the shared secret is established
+/// and BEFORE the token request (§6.5.5.7.2 step 1: collect before
+/// use — NFC field-removal note).
+///
+/// Returns the shaped getAssertion material:
+/// `pinUvAuthParam = authenticate(pinToken, clientDataHash)` (the
+/// message construction centralized in
+/// [`crate::crypto::pin_uv_auth_param_message`], OQ-9) and the
+/// selected protocol.
+#[allow(clippy::too_many_arguments)]
+async fn acquire_pin_uv_auth_token<D: Device + Send>(
+    device: &mut D,
+    info: &GetInfoResponse,
+    rp_id: &str,
+    client_data_hash: &[u8],
+    pinned_protocol: Option<PinUvAuthProtocol>,
+    provider: &mut PinProviderHandle,
+    entropy: &mut (dyn PinEntropySource + Send),
+    deadline: &Deadline,
+    sleep: SleepHandle<'_>,
+) -> Result<(PinUvAuthParam, PinUvAuthProtocol), CeremonyError> {
+    // Step 1: protocol selection (§6.5.5.4). A caller-pinned protocol
+    // is honored when advertised; otherwise the FIRST advertised entry
+    // the library implements (the authenticator's preference order).
+    let advertised = info.pin_uv_auth_protocols.as_deref().unwrap_or(&[]);
+    let selected = match pinned_protocol {
+        Some(pinned) => {
+            if !pinned.is_supported_by(advertised) {
+                return Err(CeremonyError::Transport(TransportError::new(
+                    "clientPIN",
+                    format!(
+                        "pinned pinUvAuthProtocol {} is not among the authenticator's \
+                         pinUvAuthProtocols (CTAP2.1 §6.5.5)",
+                        pinned.to_u32()
+                    ),
+                )));
+            }
+            pinned
+        }
+        None => advertised
+            .iter()
+            .copied()
+            .find(|p| matches!(p, PinUvAuthProtocol::One | PinUvAuthProtocol::Two))
+            .ok_or_else(|| {
+                CeremonyError::Transport(TransportError::new(
+                    "clientPIN",
+                    String::from(
+                        "no mutually supported pinUvAuthProtocol (need protocol 1 or 2, \
+                         CTAP2.1 §6.5.5.4)",
+                    ),
+                ))
+            })?,
+    };
+
+    // Entropy is the caller-injected source (passed in; the caller
+    // owns the OS-backed stream — design D2).
+
+    // Step 2: getKeyAgreement (0x02) → encapsulate (§6.5.5.4).
+    let platform = PlatformKeyAgreement::generate(entropy)
+        .map_err(pin_crypto_err("clientPIN key generation"))?;
+    let ka_request = ClientPinRequest {
+        protocol: selected,
+        sub_command: ClientPinSubCommand::GetKeyAgreement,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: None,
+        permissions: None,
+        rp_id: None,
+    };
+    let ka_response = client_pin_hop(device, &ka_request, deadline, sleep).await?;
+    let peer_key = ka_response.key_agreement.ok_or_else(|| {
+        CeremonyError::Transport(TransportError::new(
+            "clientPIN",
+            String::from(
+                "getKeyAgreement response carries no keyAgreement member (CTAP2.1 §6.5.5)",
+            ),
+        ))
+    })?;
+    let shared = platform
+        .encapsulate(&peer_key, selected)
+        .map_err(pin_crypto_err("clientPIN key agreement"))?;
+
+    // Step 3: collect the PIN via the provider (at most once; §6.5.5
+    // maximum 63 UTF-8 bytes, checked BEFORE any further device
+    // traffic).
+    let pin = provider
+        .provide_pin()
+        .map_err(|_| CeremonyError::PinProviderFailed)?;
+    if pin.len() > MAX_PIN_BYTES {
+        return Err(CeremonyError::PinTooLong);
+    }
+    // pinHash source: LEFT(SHA-256(PIN), 16) (CTAP2.1 §6.5.6/§6.5.7
+    // encrypt input). Zeroized after use (no-secrets rule).
+    let pin_hash_full = Sha256::digest(&pin);
+    let mut pin_hash = Zeroizing::new([0u8; 16]);
+    pin_hash.copy_from_slice(&pin_hash_full[..16]);
+    let mut pin = pin;
+    pin.zeroize();
+
+    // Step 4: the token request — 0x09 with permissions=ga + rpId
+    // when the probe advertises the pinUvAuthToken option ID,
+    // otherwise the CTAP2.0-token fallback getPinToken (0x05).
+    let puat_option = info.option(crate::get_info::OptionId::PinUvAuthToken);
+    let sub_command = if puat_option {
+        ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions
+    } else {
+        ClientPinSubCommand::GetPinToken
+    };
+    let pin_hash_enc = shared
+        .encrypt(entropy, pin_hash.as_ref())
+        .map_err(pin_crypto_err("pinHashEnc encryption"))?;
+    let token_request = ClientPinRequest {
+        protocol: selected,
+        sub_command,
+        key_agreement: Some(platform.cose_key()),
+        pin_uv_auth_param: None,
+        pin_hash_enc: Some(pin_hash_enc),
+        permissions: puat_option.then_some(permissions::GA),
+        rp_id: puat_option.then(|| alloc::string::String::from(rp_id)),
+    };
+    let token_response = match client_pin_hop(device, &token_request, deadline, sleep).await {
+        Ok(resp) => resp,
+        // 0x31 with a pinRetries member: surface the count (design
+        // D5). The ceremony does not retry (mirrors OQ-1).
+        Err(err @ CeremonyError::IncorrectPin { .. }) => return Err(err),
+        Err(other) => return Err(other),
+    };
+    let encrypted_token = token_response.pin_uv_auth_token.ok_or_else(|| {
+        CeremonyError::Transport(TransportError::new(
+            "clientPIN",
+            String::from(
+                "token request succeeded without a pinUvAuthToken member (CTAP2.1 §6.5.5)",
+            ),
+        ))
+    })?;
+
+    // Step 5: decrypt the token; compute the getAssertion material.
+    let token = shared
+        .decrypt(&encrypted_token)
+        .map_err(pin_crypto_err("pinUvAuthToken decryption"))?;
+    let param_message = pin_uv_auth_param_message(client_data_hash);
+    let param = shared.authenticate(&token, &param_message);
+    let mut token = token;
+    token.zeroize();
+
+    Ok((PinUvAuthParam::new(param), selected))
+}
+
+/// One authenticatorClientPIN (0x06) hop: encode → send (racing the
+/// remaining budget, phase `ClientPin`) → status check → decode.
+async fn client_pin_hop<D: Device + Send>(
+    device: &mut D,
+    request: &ClientPinRequest,
+    deadline: &Deadline,
+    sleep: SleepHandle<'_>,
+) -> Result<ClientPinResponse, CeremonyError> {
+    let body = request.encode().map_err(|e| {
+        CeremonyError::Transport(TransportError::new(
+            "clientPIN",
+            format!("clientPIN request encode: {e}"),
+        ))
+    })?;
+    let cmd = CtapCommand::ClientPin(request.clone());
+    let event = race(
+        device.send(&cmd, deadline, sleep),
+        sleep,
+        deadline,
+        Phase::ClientPin,
+    )
+    .await?;
+    let _ = body; // the model carries the wire shape; encode() is the canonical-form check
+    let (status, response_body) = response_of(event)?;
+    if status == StatusCode::PinInvalid.to_u8() {
+        // Extract pinRetries from the (possibly empty-bodied) error.
+        let retries = if response_body.is_empty() {
+            None
+        } else {
+            CborValue::decode_map(&response_body, DecodePolicy::Tolerant)
+                .ok()
+                .and_then(|v| ClientPinResponse::from_cbor(&v).ok())
+                .and_then(|r| r.pin_retries)
+        };
+        return Err(CeremonyError::IncorrectPin {
+            remaining_retries: retries,
+        });
+    }
+    if let Some(err) = CeremonyError::from_status(StatusCode::from_u8(status)) {
+        return Err(err);
+    }
+    let value = CborValue::decode_map(&response_body, DecodePolicy::Strict).map_err(|e| {
+        CeremonyError::Transport(TransportError::new(
+            "clientPIN",
+            format!("clientPIN response: {e}"),
+        ))
+    })?;
+    ClientPinResponse::from_cbor(&value).map_err(|e| {
+        CeremonyError::Transport(TransportError::new(
+            "clientPIN",
+            format!("clientPIN response: {e}"),
+        ))
+    })
+}
+
+/// Map the crypto layer's typed errors onto the ceremony taxonomy as
+/// `Transport` details naming the clientPIN layer (design D5: the
+/// taxonomy stays closed; the cause is carried in the detail).
+fn pin_crypto_err(layer: &'static str) -> impl Fn(PinCryptoError) -> CeremonyError {
+    move |e| CeremonyError::Transport(TransportError::new("clientPIN", format!("{layer}: {e}")))
+}
+
+/// The entropy default when the caller injected none: always a typed
+/// failure. Production callers inject an OS-backed source; the soft
+/// harness injects its deterministic stream.
+#[cfg(test)]
+#[allow(dead_code)]
+struct DeadEntropy;
+
+#[cfg(test)]
+impl PinEntropySource for DeadEntropy {
+    fn fill_random(&mut self, _dest: &mut [u8]) -> Result<(), PinCryptoError> {
+        Err(PinCryptoError::Random)
+    }
 }
 
 /// Split a terminal response event into its status byte and body,
@@ -592,8 +948,21 @@ pub struct GetAssertionCeremony<T> {
     /// User-verification policy (design D4).
     pub user_verification: UvPolicy,
     /// Caller-held pinUvAuth material (keys 0x06/0x07), passed through
-    /// when the authenticator supports the protocol.
+    /// when the authenticator supports the protocol. Takes precedence
+    /// over PIN acquisition.
     pub pin_uv_auth: Option<(PinUvAuthParam, PinUvAuthProtocol)>,
+    /// Caller-owned PIN provider (add-client-pin design D3): enables
+    /// the CTAP2.1 §6.5.5 token acquisition under
+    /// [`UvPolicy::Preferred`]. Consumed at most once per run.
+    pub pin_provider: Option<PinProviderHandle>,
+    /// Caller-pinned pinUvAuth protocol (§6.5.5.4); default follows
+    /// the authenticator's preference order.
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    /// Entropy for platform key pairs and protocol-2 IVs (design D2).
+    /// Production callers MUST inject an OS-backed source; leaving
+    /// this `None` fails the acquisition typed (no silent insecure
+    /// fallback).
+    pub entropy: Option<alloc::boxed::Box<dyn crate::crypto::PinEntropySource + Send>>,
     /// The single total ceremony budget (async-core D4): discovery,
     /// connect, probe, exchange, and every drain hop consume its
     /// remainder.
@@ -624,6 +993,9 @@ impl<T> GetAssertionCeremony<T> {
             allow_credentials: None,
             user_verification: UvPolicy::default(),
             pin_uv_auth: None,
+            pin_provider: None,
+            pin_uv_auth_protocol: None,
+            entropy: None,
             deadline,
             selection: SelectionPolicy::default(),
             drain: None,
@@ -697,6 +1069,9 @@ where
             allow_credentials: self.allow_credentials,
             user_verification: self.user_verification,
             pin_uv_auth: self.pin_uv_auth,
+            pin_provider: self.pin_provider,
+            pin_uv_auth_protocol: self.pin_uv_auth_protocol,
+            entropy: self.entropy,
         };
         // The candidate carries the index of the transport that
         // enumerated it, so the selected descriptor always maps back
@@ -769,15 +1144,11 @@ where
     }
 }
 
-/// The transport kind for per-transport diagnostics. The `Transport`
-/// trait does not expose its kind (async-core scope), so v1 reports
-/// the `soft` label — the only transport in the v1 crate graph. When
-/// the hardware transports land, their `Transport` impls should carry
-/// their kind (e.g. by wrapping enumerate errors before handing
-/// transports to the ceremony); flagged in the ceremony change's
-/// patch-back notes.
-fn transport_kind<T: Transport>(_transport: &T) -> crate::transport::TransportKind {
-    crate::transport::TransportKind::Soft
+/// The transport kind for per-transport diagnostics: each transport
+/// names its own layer via [`Transport::kind()`] (add-client-pin:
+/// replaces the v1 hardcoded `Soft` label; ceremony OQ-6 superseded).
+fn transport_kind<T: Transport>(transport: &T) -> crate::transport::TransportKind {
+    transport.kind()
 }
 
 // ----------------------------------------------------------------------
@@ -798,8 +1169,20 @@ pub struct GetAssertionExchange {
     /// User-verification policy (design D4).
     pub user_verification: UvPolicy,
     /// Caller-held pinUvAuth material (keys 0x06/0x07), passed through
-    /// when the authenticator supports the protocol.
+    /// when the authenticator supports the protocol. Takes precedence
+    /// over PIN acquisition.
     pub pin_uv_auth: Option<(PinUvAuthParam, PinUvAuthProtocol)>,
+    /// Caller-owned PIN provider (add-client-pin design D3): enables
+    /// the CTAP2.1 §6.5.5 token acquisition under
+    /// [`UvPolicy::Preferred`]. Consumed at most once per run.
+    pub pin_provider: Option<PinProviderHandle>,
+    /// Caller-pinned pinUvAuth protocol (§6.5.5.4); default follows
+    /// the authenticator's preference order.
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    /// Entropy for platform key pairs and protocol-2 IVs (design D2).
+    /// Production callers MUST inject an OS-backed source; leaving this
+    /// `None` fails the acquisition typed (no silent insecure fallback).
+    pub entropy: Option<alloc::boxed::Box<dyn crate::crypto::PinEntropySource + Send>>,
     /// Continuation hook for the §6.3 drain (see [`Drain`]).
     pub drain: Option<Drain>,
 }
@@ -819,6 +1202,9 @@ impl Ceremony for GetAssertionExchange {
             allow_credentials: self.allow_credentials,
             user_verification: self.user_verification,
             pin_uv_auth: self.pin_uv_auth,
+            pin_provider: self.pin_provider,
+            pin_uv_auth_protocol: self.pin_uv_auth_protocol,
+            entropy: self.entropy,
         };
         exchange_pipeline(device, input, self.drain, deadline, sleep).await
     }

@@ -228,6 +228,9 @@ pub enum InvalidRequest {
     /// CTAP2.1 §6.2: "A platform MUST NOT send an empty allowList" —
     /// key 0x03 MUST be omitted instead.
     EmptyAllowList,
+    /// CTAP2.1 §6.5.5: the permissions bitfield "MUST NOT be 0" when
+    /// present on an authenticatorClientPIN request.
+    EmptyPermissions,
 }
 
 impl fmt::Display for InvalidRequest {
@@ -240,6 +243,10 @@ impl fmt::Display for InvalidRequest {
             Self::EmptyAllowList => write!(
                 f,
                 "empty allowList MUST be omitted, not sent (CTAP2.1 §6.2)"
+            ),
+            Self::EmptyPermissions => write!(
+                f,
+                "permissions bitfield MUST NOT be 0 when present (CTAP2.1 §6.5.5)"
             ),
         }
     }
@@ -428,6 +435,40 @@ pub enum CeremonyError {
         /// The ids the caller's allow list permits.
         allowed: Vec<Vec<u8>>,
     },
+    /// Wrong PIN on the authenticator (0x31 CTAP2_ERR_PIN_INVALID,
+    /// add-client-pin). Carries the remaining-retry count when the
+    /// authenticator supplied it (§6.5.5 response member 0x03).
+    /// Display names the fix (re-enter the PIN); the ceremony never
+    /// retries implicitly.
+    IncorrectPin {
+        /// pinRetries from the failing response, when offered.
+        remaining_retries: Option<u8>,
+    },
+    /// PIN retry counter exhausted (0x32 CTAP2_ERR_PIN_BLOCKED) — the
+    /// authenticator refuses PIN operations until its own recovery
+    /// (reset/power cycle per its policy).
+    PinBlocked,
+    /// pinUvAuthToken acquisition blocked after 3 consecutive PIN
+    /// mismatches (0x34 CTAP2_ERR_PIN_AUTH_BLOCKED, CTAP2.1
+    /// §6.5.5.7.2) — a power cycle is required to clear.
+    PinAuthBlocked,
+    /// No PIN is set on the authenticator (0x35 CTAP2_ERR_PIN_NOT_SET)
+    /// — distinct from a wrong PIN: the fix is to SET a PIN, not to
+    /// retype one.
+    PinNotSet,
+    /// `UvPolicy::Preferred` on a PIN-capable key with no built-in
+    /// verifier and NO PIN provider supplied (add-client-pin: replaces
+    /// the v1 silent Discouraged degradation). The Display text names
+    /// the fix: supply a PIN provider.
+    PinRequired,
+    /// The caller's PIN provider itself failed (user cancelled the
+    /// prompt, keystore locked, …). No authenticator round-trip
+    /// occurred after the provider step; no retry is implicit.
+    PinProviderFailed,
+    /// The provider returned more than [`crate::pin::MAX_PIN_BYTES`]
+    /// UTF-8 bytes (CTAP2.1 §6.5.5.5 maximum PIN length). Rejected
+    /// BEFORE any device traffic that could consume retry counters.
+    PinTooLong,
 }
 
 impl CeremonyError {
@@ -474,10 +515,15 @@ impl CeremonyError {
             StatusCode::NoCredentials | StatusCode::InvalidCredential => Some(Self::NoCredentials),
             StatusCode::UserActionTimeout => Some(Self::UserActionTimeout),
             StatusCode::KeepaliveCancel => Some(Self::UserCancelled),
+            StatusCode::PinInvalid => Some(Self::IncorrectPin {
+                remaining_retries: None,
+            }),
+            StatusCode::PinBlocked => Some(Self::PinBlocked),
+            StatusCode::PinAuthBlocked => Some(Self::PinAuthBlocked),
+            StatusCode::PinNotSet => Some(Self::PinNotSet),
             StatusCode::OperationDenied
             | StatusCode::UpRequired
             | StatusCode::PinAuthInvalid
-            | StatusCode::PinAuthBlocked
             | StatusCode::PuatRequired
             | StatusCode::PinPolicyViolation
             | StatusCode::UvBlocked => Some(Self::UpRejected),
@@ -528,6 +574,41 @@ impl fmt::Display for CeremonyError {
                 hex_truncated(returned),
                 HexIdList(allowed),
             ),
+            Self::IncorrectPin { remaining_retries } => match remaining_retries {
+                Some(n) => write!(
+                    f,
+                    "incorrect PIN ({n} attempt{} remaining before lockout) — re-enter the PIN (CTAP2_ERR_PIN_INVALID)",
+                    if *n == 1 { "" } else { "s" }
+                ),
+                None => write!(
+                    f,
+                    "incorrect PIN — re-enter the PIN (CTAP2_ERR_PIN_INVALID)"
+                ),
+            },
+            Self::PinBlocked => write!(
+                f,
+                "PIN blocked: retry counter exhausted; reset/power-cycle the authenticator (CTAP2_ERR_PIN_BLOCKED)"
+            ),
+            Self::PinAuthBlocked => write!(
+                f,
+                "PIN authentication blocked after repeated mismatches — power cycle the authenticator to continue (CTAP2_ERR_PIN_AUTH_BLOCKED)"
+            ),
+            Self::PinNotSet => write!(
+                f,
+                "no PIN is set on the authenticator — set a PIN first (CTAP2_ERR_PIN_NOT_SET)"
+            ),
+            Self::PinRequired => write!(
+                f,
+                "this authenticator verifies users via its PIN and no PIN provider was supplied — pass a PinProviderHandle to run UvPolicy::Preferred"
+            ),
+            Self::PinProviderFailed => write!(
+                f,
+                "the caller's PIN provider failed before the token request; no device traffic was spent"
+            ),
+            Self::PinTooLong => write!(
+                f,
+                "the supplied PIN exceeds the 63-byte CTAP2.1 §6.5.5 maximum"
+            ),
         }
     }
 }
@@ -546,6 +627,49 @@ fn hex_truncated(bytes: &[u8]) -> alloc::string::String {
         let _ = write!(out, "…({} bytes)", bytes.len());
     }
     out
+}
+
+// ----------------------------------------------------------------------
+// std-gated std::error::Error impls (add-client-pin, design D7).
+//
+// fidoh-core itself stays no_std; on the `std` feature (default-off)
+// the five public error types implement std::error::Error so
+// Box<dyn std::error::Error> / anyhow consumers can propagate them
+// without per-crate wrappers. thiserror stays out (module header).
+// ----------------------------------------------------------------------
+
+#[cfg(feature = "std")]
+mod std_error_impls {
+    // no_std crate: opt into std for this module only.
+    extern crate std;
+
+    use super::{CeremonyError, DecodeError, EncodeError, Error, InvalidRequest, TransportError};
+
+    impl std::error::Error for CeremonyError {}
+    impl std::error::Error for Error {}
+    impl std::error::Error for DecodeError {}
+    impl std::error::Error for EncodeError {}
+    impl std::error::Error for TransportError {}
+
+    // InvalidRequest rides inside EncodeError::InvalidRequest; expose
+    // it as its own source-capable error too.
+    impl std::error::Error for InvalidRequest {}
+}
+
+#[cfg(all(test, feature = "std"))]
+mod std_error_tests {
+    // Compiled (and run) only with the std feature; a build without
+    // it never sees this module. The crate itself stays no_std, so
+    // std is referenced by full path here.
+
+    #[test]
+    fn ceremony_error_is_a_std_error_object() {
+        extern crate std;
+        let err: std::boxed::Box<dyn std::error::Error> =
+            std::boxed::Box::new(super::CeremonyError::PinRequired);
+        let text = alloc::string::ToString::to_string(&err);
+        std::assert!(text.contains("PinProviderHandle"));
+    }
 }
 
 /// Comma-separated truncated-safe hex list (Display helper for

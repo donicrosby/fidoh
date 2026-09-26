@@ -202,19 +202,31 @@ pub trait Transport {
         sleep: SleepHandle,
     ) -> impl Future<Output = Result<Vec<DeviceInfo>, Error>> + Send;
 
-    /// Connect to the device with the given identifier, bounded by the
+    /// Connect device given identifier, bounded by the
     /// remaining budget.
     ///
-    /// Dropping the returned future before completion must leave the
-    /// underlying authenticator usable by a subsequent `connect`
+    /// Dropping returned future before completion must leave the
+    /// underlying authenticator usable by subsequent `connect`
     /// (async-core spec: "a dropped connect future SHALL leave the
-    /// underlying authenticator usable by a subsequent `connect`").
+    /// underlying authenticator usable by subsequent `connect`").
     fn connect(
         &self,
         id: &DeviceId,
         deadline: &crate::time::Deadline,
         sleep: SleepHandle,
     ) -> impl Future<Output = Result<Self::Device, Error>> + Send;
+
+    /// This transport's layer (add-client-pin: `Transport::kind()`) —
+    /// used by discovery diagnostics so `NoDevice` causes and outcome
+    /// diagnostics name the real failing transport instead of a
+    /// hardcoded label (ceremony design D6; async-core spec delta).
+    ///
+    /// The default answer is `Soft` for source compatibility with
+    /// existing external implementors; the in-tree hardware
+    /// transports override it (`Hid`, `Pcsc`).
+    fn kind(&self) -> TransportKind {
+        TransportKind::Soft
+    }
 }
 
 /// The transport kind, for diagnostics carrying per-transport detail.

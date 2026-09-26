@@ -63,6 +63,11 @@ pub enum Phase {
     /// authenticatorGetNextAssertion drain (CTAP2.1 §6.3; named by the
     /// ceremony change).
     GetNextAssertion,
+    /// authenticatorClientPIN (0x06) hops of the pinUvAuthToken
+    /// acquisition flow (CTAP2.1 §6.5.5; add-client-pin): every
+    /// getKeyAgreement / getPINRetries / token request is bounded by
+    /// the remaining budget and named `clientPin` on expiry.
+    ClientPin,
     /// Best-effort channel release on close/drop (design OQ-3, resolved:
     /// release attempt is mandatory; "if the release attempt itself
     /// fails or the deadline has already expired, the error is
@@ -82,6 +87,7 @@ impl Phase {
             Self::GetAssertion => "getAssertion",
             Self::GetInfo => "getInfo",
             Self::GetNextAssertion => "getNextAssertion",
+            Self::ClientPin => "clientPin",
             Self::Release => "release",
         }
     }

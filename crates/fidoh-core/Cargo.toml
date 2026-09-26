@@ -1,7 +1,7 @@
 [package]
 name = "fidoh-core"
 description = "CTAP2 data model, canonical CBOR, status codes, and the async trait layer — cleanroom, no_std-friendly core of fidoh"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,27 +11,62 @@ repository.workspace = true
 unsafe_code = "deny"
 
 [dependencies]
-# Intentionally dependency-free runtime: canonical CBOR is hand-rolled
-# (serde_cbor cannot enforce CTAP2.1 §8 sorted keys / indefinite-length
-# rejection) and errors use manual Display impls (thiserror is std-only
-# on MSRV 1.75). See openspec/changes/core-model/design.md.
+# Runtime crypto primitives (add-client-pin design D1, v2): the
+# pinUvAuth protocols (CTAP2.1 §6.5.6/§6.5.7) need P-256 ECDH,
+# HKDF-SHA-256, HMAC-SHA-256, SHA-256, and AES-256-CBC. House rule:
+# primitives are NEVER hand-rolled, so the zero-runtime-deps invariant
+# is deliberately deviated from for exactly these RustCrypto crates.
+# Exact `=` pins are MSRV-load-bearing: hkdf 0.13.x / hmac 0.13.x /
+# aes 0.9.x / cbc 0.2.x / sha2 0.11 declare rust-version 1.85+ (beyond
+# the workspace MSRV 1.75) and are therefore FORBIDDEN; the pinned
+# versions below were verified to compile on the real 1.75.0 toolchain
+# (probe build during the add-client-pin authoring). `cargo update`
+# must keep base64ct at 1.7.3 and zeroize at 1.8.2 — later releases
+# are edition-2024 and break the 1.75 resolution (the committed
+# Cargo.lock pins them; CI builds --locked).
 #
-# async-core design D5: "No feature may add a dependency to
-# `fidoh-core`" — this section must remain empty.
+# Everything else stays hand-rolled on purpose: canonical CBOR
+# (serde_cbor cannot enforce CTAP2.1 §8 sorted keys /
+# indefinite-length rejection) and errors use manual Display impls
+# (thiserror is std-only on MSRV 1.75). See
+# openspec/changes/core-model/design.md.
+p256 = { version = "=0.13.2", default-features = false, features = [
+    "ecdsa",
+    "sha256",
+    "alloc",
+    "arithmetic",
+    "ecdh",
+] }
+hkdf = { version = "=0.12.4", default-features = false }
+hmac = { version = "=0.12.1", default-features = false }
+sha2 = { version = "=0.10.9", default-features = false }
+aes = { version = "=0.8.4", default-features = false }
+cbc = { version = "=0.1.2", default-features = false, features = [
+    "block-padding",
+] }
+zeroize = { version = "=1.8.2", default-features = false, features = [
+    "alloc",
+] }
 
 [dev-dependencies]
 hex = "0.4"
 # Ceremony tests drive the whole discovery→selection→probe→exchange
 # pipeline through the soft token (dev-dependency only; fidoh-core
 # itself stays dependency-free) and verify returned signatures with
-# real ECDSA (same p256 version as the soft token).
+# real ECDSA (same p256 version as the soft token). sha2 reproduces
+# the clientPIN pinHash derivation in harness-level burn-down walks
+# (LEFT(SHA-256(PIN), 16) — CTAP2.1 §6.5.6/§6.5.7; the same pinned
+# version as the main dependency table).
 fidoh-transport-soft = { path = "../fidoh-transport-soft" }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
+sha2 = { version = "=0.10.9", default-features = false }
 
 [features]
 # The feature matrix lives in the WORKSPACE ROOT facade package (spec:
-# "Feature-flag layout with soft transport as default"). fidoh-core
-# carries no switches of its own — default = [] — and its
-# [dependencies] section above stays empty: no feature anywhere in the
-# workspace may add a dependency to fidoh-core (design D5).
+# "Feature-flag layout with soft transport as default"). fidoh-core's
+# only switch is `std` (add-client-pin design D7): default-off, gates
+# the `std::error::Error` impls for the public error taxonomy. The
+# crate itself stays no_std; no feature adds anything beyond that
+# impl block.
 default = []
+std = []

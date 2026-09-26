@@ -99,6 +99,11 @@ pub enum CtapCommand {
     /// authenticatorGetAssertion (CTAP2.1 §6.2) with the
     /// caller-validated request model.
     GetAssertion(crate::get_assertion::GetAssertionRequest),
+    /// authenticatorClientPIN (CTAP2.1 §6.5.5; add-client-pin) with
+    /// the caller-validated request model: the pinUvAuthToken
+    /// acquisition hops (getKeyAgreement, getPINRetries, getPinToken /
+    /// getPinUvAuthTokenUsingPinWithPermissions).
+    ClientPin(crate::pin::ClientPinRequest),
 }
 
 impl CtapCommand {
@@ -108,6 +113,7 @@ impl CtapCommand {
         match self {
             Self::GetInfo => Phase::GetInfo,
             Self::GetAssertion(_) => Phase::GetAssertion,
+            Self::ClientPin(_) => Phase::ClientPin,
         }
     }
 }
@@ -146,3 +152,54 @@ pub enum DeviceEvent {
 /// CTAP2.1 §11.2.9.1.3; PC/SC has a logical per-connection channel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ChannelId(pub u32);
+
+/// A `Device` wrapper that taps the event stream for the keepalive UX
+/// while forwarding everything unchanged to the inner device
+/// (fidoh-cli-ui design D4, moved to core in add-client-pin so
+/// non-CLI callers stop re-implementing the seam; the CLI re-exports
+/// it and keeps the `TouchPrompt` dedup sink as the reference UX).
+///
+/// `F: FnMut(u8) + Send` — the UX closure crosses onto the ceremony
+/// future (its futures are `Send` by design, async-core A4). The
+/// wrapper holds no state beyond the sink, is `no_std`-safe, and never
+/// alters device-event fidelity: the ceremony keeps driving THIS
+/// wrapper while the caller observes what it would never see through
+/// the trait otherwise.
+pub struct UxDevice<D, F> {
+    inner: D,
+    ux: F,
+}
+
+impl<D, F> UxDevice<D, F> {
+    /// Wrap a connected device with a keepalive observer.
+    pub fn new(inner: D, ux: F) -> Self {
+        Self { inner, ux }
+    }
+}
+
+impl<D: Device + Send, F: FnMut(u8) + Send> Device for UxDevice<D, F> {
+    async fn send(
+        &mut self,
+        cmd: &CtapCommand,
+        deadline: &Deadline,
+        sleep: SleepHandle<'_>,
+    ) -> Result<DeviceEvent, crate::error::Error> {
+        let event = self.inner.send(cmd, deadline, sleep).await;
+        if let Ok(DeviceEvent::Keepalive { status }) = &event {
+            (self.ux)(*status);
+        }
+        event
+    }
+
+    async fn open_channel(
+        &mut self,
+        deadline: &Deadline,
+        sleep: SleepHandle<'_>,
+    ) -> Result<ChannelId, crate::error::Error> {
+        self.inner.open_channel(deadline, sleep).await
+    }
+
+    async fn close(self) -> Result<(), crate::error::Error> {
+        self.inner.close().await
+    }
+}

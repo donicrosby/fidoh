@@ -57,6 +57,7 @@ extern crate alloc;
 pub mod cbor;
 pub mod ceremony;
 pub mod cose;
+pub mod crypto;
 pub mod device;
 pub mod error;
 pub mod future;
