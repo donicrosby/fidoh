@@ -17,6 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      - name: Install libpcsclite for publish verification
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+
       - name: Extract changelog section for the tagged version
         run: |
           VER="${GITHUB_REF_NAME#v}"
