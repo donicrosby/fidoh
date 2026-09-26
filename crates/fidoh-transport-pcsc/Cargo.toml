@@ -18,7 +18,7 @@ default = ["std"]
 std = []
 
 [dependencies]
-fidoh-core = { path = "../fidoh-core" }
+fidoh-core = { path = "../fidoh-core", version = "0.1.0" }
 # The PC/SC client binding. Optional: the pure framing engine and all
 # CI tests build without it; only `PcscLibrary` (the real-library
 # wrapper behind the `Library` trait) needs it. design.md resolves the

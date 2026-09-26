@@ -20,7 +20,7 @@ snapshot = ["std", "dep:serde", "dep:serde_json"]
 std = ["p256/std", "serde/std", "serde?/alloc"]
 
 [dependencies]
-fidoh-core = { path = "../fidoh-core" }
+fidoh-core = { path = "../fidoh-core", version = "0.1.0" }
 # ES256 (ECDSA P-256 + SHA-256) in pure Rust, no_std-capable, zero C
 # toolchains. Chosen over `ring` (std-only, C/assembly backend) and a
 # hand-rolled signer (never acceptable for real signatures).
@@ -43,5 +43,5 @@ p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha25
 # Examples: `assert_minimal` rides the workspace's real timer through
 # the runtime adapter crate (the sanctioned edge below), and hashes
 # clientDataJSON with SHA-256 (same version as the lib dependency).
-fidoh-tokio = { path = "../fidoh-tokio" }
+fidoh-tokio = { path = "../fidoh-tokio", version = "0.1.0" }
 sha2 = { version = "0.10", default-features = false }

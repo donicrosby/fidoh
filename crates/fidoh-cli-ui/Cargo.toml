@@ -21,11 +21,11 @@ default = ["demo"]
 demo = ["dep:fidoh-transport-soft"]
 
 [dependencies]
-fidoh-core = { path = "../fidoh-core" }
+fidoh-core = { path = "../fidoh-core", version = "0.1.0" }
 # The runtime adapter (async-core design D2): Sleep factory + blocking
 # bridge. The CLI itself never names the runtime; see src/lib.rs for
 # the entry-seam note and src/exe.rs for the interim driver.
-fidoh-tokio = { path = "../fidoh-tokio" }
+fidoh-tokio = { path = "../fidoh-tokio", version = "0.1.0" }
 fidoh-transport-hid = { path = "../fidoh-transport-hid" }
 # The real PC/SC binding (feature `pcsc` on the transport crate): the
 # binary talks to real readers; the pure APDU engine underneath stays

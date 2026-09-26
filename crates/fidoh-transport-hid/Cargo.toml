@@ -16,7 +16,7 @@ unsafe_code = "deny"
 # report-descriptor parser, and the sysfs walk are all hand-rolled per
 # the stack's no-runtime-deps invariant. No libudev (design D7), no libc
 # (open flags are named Linux constants, documented in fd.rs).
-fidoh-core = { path = "../fidoh-core" }
+fidoh-core = { path = "../fidoh-core", version = "0.1.0" }
 
 [dev-dependencies]
 hex = "0.4"

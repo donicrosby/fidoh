@@ -48,17 +48,28 @@ jobs:
             published=0
             for attempt in 1 2 3; do
               echo "::group::publish $crate (attempt $attempt)"
-              if cargo publish -p "$crate"; then
+              if cargo publish -p "$crate" 2>&1 | tee /tmp/pub.log; then
                 echo "::endgroup::"
                 published=1
                 break
               fi
               echo "::endgroup::"
-              # crates.io's first new-crate publish has been known to time
-              # out server-side after the index entry lands; a rerun then
-              # fails with "already uploaded". Treat presence as success.
-              if cargo search --limit 5 "$crate" 2>/dev/null | grep -q "^$crate ="; then
-                echo "$crate already on crates.io — treating as published"
+              # Authoritative case: the upload landed server-side but the
+              # client timed out, so a retry is rejected as immutable.
+              if grep -q "already exists" /tmp/pub.log; then
+                echo "$crate already on crates.io (registry confirmed) — treating as published"
+                published=1
+                break
+              fi
+              # Fallback: probe the sparse index directly — the search index
+              # lags fresh crates by minutes and is NOT authoritative.
+              case "$crate" in
+                ????*) IPATH="4/${crate:0:2}/${crate:2:2}/$crate" ;;
+                ???)   IPATH="3/${crate:0:1}/$crate" ;;
+                *)     IPATH="2/$crate" ;;
+              esac
+              if curl -fsSL "https://index.crates.io/$IPATH" 2>/dev/null | grep -q "\"name\":\"$crate\""; then
+                echo "$crate present in crates.io sparse index — treating as published"
                 published=1
                 break
               fi

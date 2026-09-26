@@ -11,7 +11,7 @@ repository.workspace = true
 unsafe_code = "deny"
 
 [dependencies]
-fidoh-core = { path = "../fidoh-core" }
+fidoh-core = { path = "../fidoh-core", version = "0.1.0" }
 # Tokio version pin rationale (async-core OQ-1: workspace MSRV 1.75):
 # tokio declared rust-version 1.70 from 1.47 onward (1.53.x declares
 # 1.71), so the requirement floor "1.47" keeps every satisfying tokio
