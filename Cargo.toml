@@ -33,7 +33,7 @@ repository = "https://github.com/donicrosby/fidoh"
 [package]
 name = "fidoh"
 description = "Cleanroom CTAP2/WebAuthn client stack — facade crate wiring the workspace feature matrix (soft default; hid/pcsc/tokio opt-in)"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
