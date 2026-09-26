@@ -129,8 +129,14 @@ jobs:
           exit $FAIL
       - name: Verify the hook actually rejects non-conventional messages
         run: |
-          echo "not conventional" > /tmp/bad && pre-commit run --hook-stage commit-msg --commit-msg-filename /tmp/bad
-          echo "UNREACHABLE: hook accepted a non-conventional message" >&2; exit 1
+          echo "not conventional" > /tmp/bad
+          # An `if` condition is immune to `set -e`: a rejected probe is the
+          # SUCCESS path here. Only a hook that ACCEPTS garbage fails the gate.
+          if pre-commit run --hook-stage commit-msg --commit-msg-filename /tmp/bad; then
+            echo "UNREACHABLE: hook accepted a non-conventional message" >&2
+            exit 1
+          fi
+          echo "tamper-check OK: hook correctly rejected the probe"
 
   openspec:
     runs-on: ubuntu-latest
