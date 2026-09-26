@@ -41,7 +41,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -50,11 +50,11 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
       - name: PC/SC headers (all-features build)
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
       - run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
@@ -73,9 +73,9 @@ jobs:
             pcsclib: true
     name: test (${{ matrix.name }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
       - name: PC/SC headers
         if: ${{ matrix.pcsclib }}
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
@@ -84,9 +84,9 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@1.75.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
       - name: PC/SC headers
         run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
       - name: default build (soft only)
@@ -96,11 +96,47 @@ jobs:
       - name: all-features build
         run: cargo build --locked --workspace --all-features
 
+  # Conventional-commit gate: the same hook repo developers get locally
+  # (.pre-commit-config.yaml), run against this push/PR's commit range.
+  # `git log --format=%H` supplies message-file arguments (pre-commit's
+  # documented range invocation for commit-msg hooks).
+  # Latest verified 2026-09-26: pre-commit/action v3.0.1,
+  # conventional-pre-commit v4.4.0, actions/setup-python v6.1.0.
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install pre-commit && pre-commit install --hook-type commit-msg
+      # Range = commits actually arriving with this event (push events carry
+      # the old head in github.event.before; PRs carry base_ref).
+      - name: Check every incoming commit message
+        run: |
+          BASE="${{ github.event.before || format('origin/{0}', github.base_ref || 'main') }}"
+          if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then BASE="origin/${{ github.base_ref || 'main' }}"; fi
+          git log --format=%H "$BASE..HEAD" > /tmp/commits.txt
+          test -s /tmp/commits.txt || { echo "no new commits (merge of already-checked commits) — ok"; exit 0; }
+          FAIL=0
+          while read -r SHA; do
+            git log -1 --format=%B "$SHA" > /tmp/msg.txt
+            echo "checking ${SHA::7}: $(head -1 /tmp/msg.txt)"
+            pre-commit run --hook-stage commit-msg --commit-msg-filename /tmp/msg.txt || FAIL=1
+          done < /tmp/commits.txt
+          exit $FAIL
+      - name: Verify the hook actually rejects non-conventional messages
+        run: |
+          echo "not conventional" > /tmp/bad && pre-commit run --hook-stage commit-msg --commit-msg-filename /tmp/bad
+          echo "UNREACHABLE: hook accepted a non-conventional message" >&2; exit 1
+
   openspec:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
       - run: npm install -g @fission-ai/openspec@1.13.1
