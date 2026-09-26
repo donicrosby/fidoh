@@ -70,4 +70,6 @@ jobs:
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "fidoh $GITHUB_REF_NAME" --notes-file body.md
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "fidoh $GITHUB_REF_NAME" --notes-file body.md \
+            || gh release edit "$GITHUB_REF_NAME" --notes-file body.md
