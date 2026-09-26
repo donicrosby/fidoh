@@ -43,5 +43,5 @@ p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha25
 # Examples: `assert_minimal` rides the workspace's real timer through
 # the runtime adapter crate (the sanctioned edge below), and hashes
 # clientDataJSON with SHA-256 (same version as the lib dependency).
-fidoh-tokio = { path = "../fidoh-tokio", version = "0.1.0" }
+fidoh-tokio = { path = "../fidoh-tokio" }
 sha2 = { version = "0.10", default-features = false }

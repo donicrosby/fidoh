@@ -37,8 +37,8 @@ jobs:
           # dev-dependency edge, so it does not constrain publishing.
           CRATES=(
             fidoh-core
-            fidoh-transport-soft
             fidoh-tokio
+            fidoh-transport-soft
             fidoh-transport-hid
             fidoh-transport-pcsc
             fidoh-cli-ui

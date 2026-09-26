@@ -59,7 +59,7 @@ tokio = ["dep:fidoh-tokio"]
 # set (spec scenario: "fidoh-core's own dependency set is unchanged from
 # the default build").
 fidoh-core = { path = "crates/fidoh-core", version = "0.1.0" }
-fidoh-transport-soft = { path = "crates/fidoh-transport-soft", optional = true }
-fidoh-transport-hid = { path = "crates/fidoh-transport-hid", optional = true }
-fidoh-transport-pcsc = { path = "crates/fidoh-transport-pcsc", optional = true }
+fidoh-transport-soft = { path = "crates/fidoh-transport-soft", version = "0.1.0", optional = true }
+fidoh-transport-hid = { path = "crates/fidoh-transport-hid", version = "0.1.0", optional = true }
+fidoh-transport-pcsc = { path = "crates/fidoh-transport-pcsc", version = "0.1.0", optional = true }
 fidoh-tokio = { path = "crates/fidoh-tokio", version = "0.1.0", optional = true }
