@@ -1,0 +1,73 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Extract changelog section for the tagged version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VER" '
+            $0 ~ "^## " ver {flag = 1; next}
+            /^## / && flag {exit}
+            flag {print}
+          ' CHANGELOG.md > body.md
+          test -s body.md || { echo "no CHANGELOG section for $VER" >&2; exit 1; }
+
+      - name: Publish crates to crates.io (dependency order, retry-aware)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Order measured from the workspace dep graph: everything before
+          # the crate that (regular-)depends on it. soft<->tokio is only a
+          # dev-dependency edge, so it does not constrain publishing.
+          CRATES=(
+            fidoh-core
+            fidoh-transport-soft
+            fidoh-tokio
+            fidoh-transport-hid
+            fidoh-transport-pcsc
+            fidoh-cli-ui
+            fidoh
+          )
+          for crate in "${CRATES[@]}"; do
+            published=0
+            for attempt in 1 2 3; do
+              echo "::group::publish $crate (attempt $attempt)"
+              if cargo publish -p "$crate"; then
+                echo "::endgroup::"
+                published=1
+                break
+              fi
+              echo "::endgroup::"
+              # crates.io's first new-crate publish has been known to time
+              # out server-side after the index entry lands; a rerun then
+              # fails with "already uploaded". Treat presence as success.
+              if cargo search --limit 5 "$crate" 2>/dev/null | grep -q "^$crate ="; then
+                echo "$crate already on crates.io — treating as published"
+                published=1
+                break
+              fi
+              sleep $((attempt * 30))
+            done
+            [ "$published" -eq 1 ] || { echo "FAILED to publish $crate" >&2; exit 1; }
+          done
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "fidoh $GITHUB_REF_NAME" --notes-file body.md
