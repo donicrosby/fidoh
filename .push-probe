@@ -1,8 +1,0 @@
-# Changelog
-
-## 0.1.0 — 2026-09-26
-
-First stable release. Road from `0.1.0-alpha.1` through `0.1.0-beta.1`:
-
-- Core ceremony API: CTAP2 canonical CBOR encoder/decoder with status codes and
-  getAsse
