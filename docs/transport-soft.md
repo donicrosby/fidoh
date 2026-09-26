@@ -17,8 +17,11 @@ the API shape, not captured from a running system).
 | authenticatorMakeCredential | ✅ internal only | Harness method on the concrete type; **not** in the client-facing API (CTAP2.1 §6.1) |
 | authenticatorGetAssertion | ✅ | Real ECDSA P-256 signatures over `authenticatorData \|\| clientDataHash` (CTAP2.1 §6.2.2, WebAuthn L2 §6.5.5) |
 
-Attestation is always `none` (WebAuthn L2 §8.7). Out of scope: clientPIN/UV
-protocols, credential management, large blobs, hmac-secret.
+Attestation is always `none` (WebAuthn L2 §8.7). Out of scope: the
+authenticator SET/CHANGE PIN commands (harness `set_pin`/`clear_pin`
+provide the PIN state; add-client-pin v2 models the full
+authenticatorClientPIN §6.5.5 acquisition side), credential
+management, large blobs, hmac-secret.
 
 ## CI usage
 
@@ -82,6 +85,25 @@ pending.await??;
 | `initial_sign_count` | u32 | 0 | Starting value of the global signature counter |
 | `rng` | `csprng` \| `deterministic(seed)` | build-salted deterministic | Default is injectable and deterministic (seeded from a build-time salt) to keep the crate `no_std` — OS entropy requires the `std` feature. `deterministic(seed)` mode is for committed fixtures; both modes are replaceable via `RngSource` |
 | `persistent_knobs` | bool | false | If false, injection knobs reset after firing once |
+
+### clientPIN harness surface (add-client-pin, v2)
+
+Harness-only plumbing (never client API): `set_pin(bytes)` /
+`clear_pin()` arm/disarm the PIN secret; `pin_retries()` reads the
+retry counter; `power_cycle()` clears the 0x34 latch without touching
+the PIN or counter (the stand-in for unplug/replug);
+`set_pin_protocols(list)` overrides the advertised
+`pinUvAuthProtocols` (default `[2, 1]`); `set_advertise_pin_uv_auth_token(bool)`
+hides the `pinUvAuthToken` option ID (models a CTAP2.0 getPinToken-only
+token); `client_pin_knobs_mut()` exposes the clientPIN injection knobs:
+
+| clientPIN knob | Type | Default | Effect |
+|---|---|---|---|
+| `wrong_protocol_echo` | bool | off | The key-agreement register records the OTHER protocol's selector, so the token's KDF/MAC/encrypt diverge from what the client negotiated (exercises the client's protocol-exact verification) |
+| `pin_echo_decrypt` | bool | off | The token derives with a different protocol's KDF: pinHashEnc decrypt fails (0x33 PIN_AUTH_INVALID, distinguishable from a wrong PIN's 0x31) even for a correct PIN |
+
+The generic `inject_status` knob fires on authenticatorClientPIN (0x06)
+hops exactly as on getAssertion.
 
 ## authenticatorData quick reference
 
