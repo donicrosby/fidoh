@@ -53,6 +53,11 @@ fn exchange() -> GetAssertionExchange {
         allow_credentials: None,
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: Discouraged never acquires a token, so the
+        // provider/protocol/entropy fields stay inert here.
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: None,
     }
 }

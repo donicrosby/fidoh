@@ -44,4 +44,7 @@ pub mod run;
 
 pub use args::{AssertArgs, FailedFlag, Invocation, ParseOutcome};
 pub use discover::{Enumeration, NodeOutcome};
+// UxDevice moved to fidoh_core::device (add-client-pin: the reusable
+// keepalive-UX seam); re-exported here for source compatibility.
+pub use fidoh_core::device::UxDevice;
 pub use run::{TouchPrompt, DEFAULT_BUDGET, TOUCH_PROMPT};

@@ -225,6 +225,13 @@ async fn authenticate() -> Result<(), CeremonyError> {
         allow_credentials: Some(allow_list),
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: this example keeps the v1 non-interactive shape
+        // (Discouraged policy never triggers PIN acquisition; the
+        // acquisition path is exercised in the fidoh-core ceremony
+        // tests via the PIN-provider seam).
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: Some(drain),
     };
 

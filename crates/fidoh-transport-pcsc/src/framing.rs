@@ -44,6 +44,8 @@ pub mod command_byte {
     pub const GET_INFO: u8 = 0x04;
     /// authenticatorGetAssertion (CTAP2.1 §6.2).
     pub const GET_ASSERTION: u8 = 0x02;
+    /// authenticatorClientPIN (CTAP2.1 §6.5.5; add-client-pin).
+    pub const CLIENT_PIN: u8 = 0x06;
 }
 
 /// Short-form Le encoding: `0x00` = "up to 256 response bytes"

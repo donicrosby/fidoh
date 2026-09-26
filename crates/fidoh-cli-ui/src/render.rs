@@ -49,6 +49,13 @@ pub fn variant_name(err: &CeremonyError) -> &'static str {
         CeremonyError::Transport(_) => "Transport",
         CeremonyError::Ctap(_) => "Ctap",
         CeremonyError::CredentialMismatch { .. } => "CredentialMismatch",
+        CeremonyError::IncorrectPin { .. } => "IncorrectPin",
+        CeremonyError::PinBlocked => "PinBlocked",
+        CeremonyError::PinAuthBlocked => "PinAuthBlocked",
+        CeremonyError::PinNotSet => "PinNotSet",
+        CeremonyError::PinRequired => "PinRequired",
+        CeremonyError::PinProviderFailed => "PinProviderFailed",
+        CeremonyError::PinTooLong => "PinTooLong",
     }
 }
 
@@ -91,6 +98,27 @@ pub fn remediation_hint(err: &CeremonyError) -> Option<String> {
         CeremonyError::Ctap(_) => None,
         CeremonyError::CredentialMismatch { .. } => Some(String::from(
             "the token returned a credential outside the allow list — verify the --allow ids",
+        )),
+        CeremonyError::IncorrectPin { .. } => Some(String::from(
+            "the PIN was wrong — retry with the correct PIN (this tool performs no PIN entry)",
+        )),
+        CeremonyError::PinBlocked => Some(String::from(
+            "the PIN retry counter is exhausted — reset the token before retrying",
+        )),
+        CeremonyError::PinAuthBlocked => Some(String::from(
+            "PIN authentication is locked after repeated mismatches — unplug and replug (power cycle) the token",
+        )),
+        CeremonyError::PinNotSet => Some(String::from(
+            "the token has no PIN set — set one (e.g. via your token manager) before PIN-verified sign-in",
+        )),
+        CeremonyError::PinRequired => Some(String::from(
+            "this token verifies users via its PIN and this tool performs no PIN entry — use an application that supplies a PIN provider",
+        )),
+        CeremonyError::PinProviderFailed => Some(String::from(
+            "the PIN prompt was cancelled or failed — retry when ready to enter the PIN",
+        )),
+        CeremonyError::PinTooLong => Some(String::from(
+            "the supplied PIN exceeds the 63-byte CTAP2.1 maximum",
         )),
     }
 }

@@ -127,6 +127,11 @@ fn pcsc_into_core(err: PcscError, phase: Phase) -> Error {
 }
 
 impl<L: Library + 'static> Transport for PcscTransport<L> {
+    fn kind(&self) -> fidoh_core::transport::TransportKind {
+        // add-client-pin: discovery diagnostics name the real layer.
+        fidoh_core::transport::TransportKind::Pcsc
+    }
+
     type Device = PcscDevice<L>;
 
     async fn enumerate(
@@ -382,6 +387,15 @@ impl<L: Library + 'static> CtapDevice for PcscDevice<L> {
                     .encode()
                     .map_err(|e| encode_error(phase, alloc::format!("{e}")))?;
                 (command_byte::GET_ASSERTION, payload)
+            }
+            CtapCommand::ClientPin(request) => {
+                // authenticatorClientPIN is CTAP command 0x06
+                // (CTAP2.1 §6.5.5); add-client-pin wires the transport
+                // framing for the acquisition hops.
+                let payload = request
+                    .encode()
+                    .map_err(|e| encode_error(phase, alloc::format!("{e}")))?;
+                (command_byte::CLIENT_PIN, payload)
             }
         };
         // One exchange state machine per send (§11.3.5.2 receive

@@ -1,7 +1,7 @@
 [package]
 name = "fidoh-transport-pcsc"
 description = "ISO 7816-4 APDU transport over PC/SC — FIDO over CCID and NFC (CTAP2.1 §11) on the shared Transport/Device traits"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

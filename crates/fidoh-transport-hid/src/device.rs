@@ -65,6 +65,11 @@ impl HidTransport {
 impl Transport for HidTransport {
     type Device = HidDevice;
 
+    fn kind(&self) -> fidoh_core::transport::TransportKind {
+        // add-client-pin: discovery diagnostics name the real layer.
+        fidoh_core::transport::TransportKind::Hid
+    }
+
     async fn enumerate(
         &self,
         deadline: &Deadline,
@@ -333,15 +338,24 @@ impl<F: RawFd + Send> Device for HidDevice<F> {
                 })?;
                 cbor_payload(0x02, &body)
             }
+            CtapCommand::ClientPin(request) => {
+                // authenticatorClientPIN: command byte 0x06 with the
+                // §6.5.5 request as body (add-client-pin; the CTAPHID
+                // framing is command-agnostic).
+                let body = request.encode().map_err(|e| {
+                    Error::Transport(fidoh_core::TransportError::new(
+                        "hid",
+                        alloc::format!("clientPIN request encode: {e}"),
+                    ))
+                })?;
+                cbor_payload(0x06, &body)
+            }
         };
         // Oversized outgoing messages are rejected INSIDE
         // transaction→encode_message before any packet is written
         // (spec scenario "Oversized message rejected before
         // transmission").
-        let base = match cmd {
-            CtapCommand::GetInfo => Phase::GetInfo,
-            CtapCommand::GetAssertion(_) => Phase::GetAssertion,
-        };
+        let base = cmd.phase();
         self.exchange(&payload, base, deadline, sleep).await
     }
 

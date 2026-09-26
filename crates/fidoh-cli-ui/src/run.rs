@@ -27,7 +27,7 @@ use std::format;
 use std::string::String;
 use std::vec::Vec;
 
-use fidoh_core::device::{ChannelId, CtapCommand, Device, DeviceEvent};
+use fidoh_core::device::{Device, UxDevice};
 use fidoh_core::error::CeremonyError;
 use fidoh_core::get_assertion::{
     CredentialType, GetAssertionRequest, PublicKeyCredentialDescriptor,
@@ -151,51 +151,9 @@ impl<S: FnMut(&str)> KeepaliveUX for TouchPrompt<S> {
     }
 }
 
-/// A `Device` wrapper that taps the event stream for the UX while
-/// forwarding everything unchanged to the inner device (the ceremony
-/// keeps driving the wrapper; the CLI observes what it would never see
-/// through the trait otherwise).
-///
-/// `F: FnMut(u8) + Send + 'static` — the UX closure crosses onto the
-/// ceremony future (its futures are `Send` by design, async-core A4).
-pub struct UxDevice<D, F> {
-    inner: D,
-    ux: F,
-}
-
-impl<D, F> UxDevice<D, F> {
-    /// Wrap a connected device with a keepalive observer.
-    pub fn new(inner: D, ux: F) -> Self {
-        Self { inner, ux }
-    }
-}
-
-impl<D: Device + Send, F: FnMut(u8) + Send> Device for UxDevice<D, F> {
-    async fn send(
-        &mut self,
-        cmd: &CtapCommand,
-        deadline: &Deadline,
-        sleep: SleepHandle<'_>,
-    ) -> Result<DeviceEvent, fidoh_core::Error> {
-        let event = self.inner.send(cmd, deadline, sleep).await;
-        if let Ok(DeviceEvent::Keepalive { status }) = &event {
-            (self.ux)(*status);
-        }
-        event
-    }
-
-    async fn open_channel(
-        &mut self,
-        deadline: &Deadline,
-        sleep: SleepHandle<'_>,
-    ) -> Result<ChannelId, fidoh_core::Error> {
-        self.inner.open_channel(deadline, sleep).await
-    }
-
-    async fn close(self) -> Result<(), fidoh_core::Error> {
-        self.inner.close().await
-    }
-}
+// UxDevice moved to fidoh_core::device (add-client-pin); the
+// re-export lives in the crate root (`pub use fidoh_core::device::
+// UxDevice`), so this module keeps using it unchanged.
 
 // --------------------------------------------------------------------
 // Request construction + the assert exchange path.
@@ -230,6 +188,13 @@ pub fn exchange_input(args: &AssertArgs) -> GetAssertionExchange {
         },
         user_verification: UvPolicy::Discouraged,
         pin_uv_auth: None,
+        // v2 fields: the CLI's `assert` stays non-interactive (v1 scope
+        // fence — no PIN entry in this path); PIN acquisition arrives
+        // via the caller-held provider seam, which the CLI does not
+        // wire yet.
+        pin_provider: None,
+        pin_uv_auth_protocol: None,
+        entropy: None,
         drain: None,
     }
 }
